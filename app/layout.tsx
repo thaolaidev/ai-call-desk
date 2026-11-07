@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
-export const metadata: Metadata = { title: "ห้องโทร AI", description: "AI โทรหาเจ้าของคอนโด" };
+export const metadata: Metadata = { title: "ห้องโทร AI · Thaolai.com", description: "AI โทรหาเจ้าของคอนโด" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

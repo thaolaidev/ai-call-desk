@@ -7,6 +7,10 @@ export default function LoginPage() {
   return (
     <main className="login">
       <form className="card" action={action}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img className="logo-light" src="/logo.png" alt="Thaolai.com" width={200} height={39} />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img className="logo-dark" src="/logo-yellow.png" alt="Thaolai.com" width={200} height={39} />
         <div>
           <h1>ห้องโทร AI</h1>
           <p className="muted small">เข้าสู่ระบบด้วยบัญชีทีมงาน</p>
