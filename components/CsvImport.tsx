@@ -11,14 +11,14 @@ function parse(text: string): CsvRow[] {
     .map(([owner_name, phone, condo, unit, rent, customer_nationalities]) => ({ owner_name, phone, condo, unit, rent, customer_nationalities }));
 }
 
-export function CsvImport() {
+export function CsvImport({ segment = "new" }: { segment?: "new" | "old" }) {
   const ref = useRef<HTMLInputElement>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
   return (
     <>
       <button type="button" className="btn" disabled={pending} onClick={() => ref.current?.click()}>
-        {pending ? "กำลังนำเข้า…" : "นำเข้า CSV"}
+        {pending ? "กำลังนำเข้า…" : `นำเข้า CSV เป็น${segment === "old" ? "ทรัพย์เก่า" : "ทรัพย์ใหม่"}`}
       </button>
       <input
         ref={ref}
@@ -32,7 +32,7 @@ export function CsvImport() {
           e.target.value = "";
           if (!rows.length) return setMsg("ไม่พบข้อมูล ตรวจรูปแบบ: ชื่อเจ้าของ,เบอร์โทร,คอนโด,ห้อง,ค่าเช่า,สัญชาติลูกค้า");
           start(async () => {
-            const r = await importLeads(rows);
+            const r = await importLeads(rows, segment);
             setMsg(r.error ? `นำเข้าไม่สำเร็จ: ${r.error}` : `นำเข้า ${r.inserted} ห้อง (ข้ามที่ซ้ำ ${rows.length - r.inserted})`);
           });
         }}

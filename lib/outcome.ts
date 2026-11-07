@@ -34,7 +34,7 @@ const NEXT_ACTION: Record<Outcome, string> = {
  * ใช้ร่วมกันทั้งโหมดจำลองและ webhook ของ Vapi
  */
 export async function applyCallResult(db: SupabaseClient, r: CallResult) {
-  const { data: call } = await db.from("calls").select("*, leads(*)").eq("id", r.callId).single();
+  const { data: call } = await db.from("calls").select("*, leads!calls_lead_id_fkey(*)").eq("id", r.callId).single();
   if (!call || call.state === "ended") return; // ประมวลผลไปแล้ว (webhook ซ้ำ)
   const lead = call.leads;
   const { data: s } = await db.from("settings").select("retry_gap_min,max_attempts").eq("id", 1).single();

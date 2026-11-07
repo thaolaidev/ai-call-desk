@@ -16,8 +16,8 @@ export default async function CallingPage() {
   const [{ data: s, error }, { count: today }, { data: live }, { data: queue, count: qCount }] = await Promise.all([
     sb.from("settings").select("*").eq("id", 1).single(),
     sb.from("calls").select("id", { count: "exact", head: true }).gte("started_at", from).lt("started_at", to),
-    sb.from("calls").select("id, state, started_at, attempt, leads(condo, unit, owner_name, phone)").in("state", ["dialing", "ringing", "in_progress"]).order("started_at"),
-    sb.from("leads").select("id, condo, owner_name, phone, status, attempts", { count: "exact" }).eq("status", "queued").order("created_at").limit(10),
+    sb.from("calls").select("id, state, started_at, attempt, leads!calls_lead_id_fkey(condo, unit, owner_name, phone, segment)").in("state", ["dialing", "ringing", "in_progress"]).order("started_at"),
+    sb.from("leads").select("id, condo, owner_name, phone, status, attempts, segment", { count: "exact" }).eq("status", "queued").order("created_at").limit(10),
   ]);
   if (error || !s) return <div className="view"><p className="banner err">{error?.message ?? "ไม่พบ settings"}</p></div>;
 
@@ -52,7 +52,7 @@ export default async function CallingPage() {
               return (
                 <div key={c.id} className={`line ${c.state}`}>
                   <div className="line-h"><b>สาย {i + 1}</b><span>{STATE_LABEL[c.state]}</span></div>
-                  <b>{l?.condo}</b>
+                  <b>{l?.condo} <span className="seg">{l?.segment === "old" ? "เก่า" : "ใหม่"}</span></b>
                   <span className="small muted">คุณ{l?.owner_name} · <span className="mono">{l ? prettyPhone(l.phone) : ""}</span></span>
                   <span className="small muted">เริ่ม {fmtTime(c.started_at)} · ครั้งที่ {c.attempt}</span>
                 </div>
@@ -88,7 +88,7 @@ export default async function CallingPage() {
             {(queue ?? []).map((l: any, i: number) => (
               <div className="list-row" key={l.id} style={{ gridTemplateColumns: "28px 1fr" }}>
                 <span className="mono muted">{i + 1}</span>
-                <span><b style={{ fontWeight: 500 }}>{l.condo}</b> <span className="muted small">คุณ{l.owner_name} · <span className="mono">{prettyPhone(l.phone)}</span></span></span>
+                <span><span className="seg">{l.segment === "old" ? "เก่า" : "ใหม่"}</span> <b style={{ fontWeight: 500 }}>{l.condo}</b> <span className="muted small">คุณ{l.owner_name} · <span className="mono">{prettyPhone(l.phone)}</span></span></span>
               </div>
             ))}
             {!queue?.length && <p className="empty">ไม่มีห้องในคิว ไปที่กองลีดเพื่อส่งเข้าคิว</p>}

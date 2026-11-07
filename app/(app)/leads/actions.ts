@@ -28,6 +28,7 @@ export async function addLead(formData: FormData) {
     rent,
     source: String(formData.get("source") ?? "เพิ่มเอง"),
     customer_nationalities: String(formData.get("customer_nationalities") ?? "").trim() || null,
+    segment: formData.get("segment") === "old" ? "old" : "new",
     status: await autoStatus(supabase),
   });
   revalidatePath("/leads");
@@ -35,7 +36,7 @@ export async function addLead(formData: FormData) {
 
 export type CsvRow = { owner_name: string; phone: string; condo: string; unit?: string; rent?: string; customer_nationalities?: string };
 
-export async function importLeads(rows: CsvRow[]): Promise<{ inserted: number; error?: string }> {
+export async function importLeads(rows: CsvRow[], segment: "new" | "old" = "new"): Promise<{ inserted: number; error?: string }> {
   const supabase = await createClient();
   const status = await autoStatus(supabase);
   const clean = rows
@@ -48,6 +49,7 @@ export async function importLeads(rows: CsvRow[]): Promise<{ inserted: number; e
       rent: Number(String(r.rent ?? "").replace(/\D/g, "")) || null,
       customer_nationalities: r.customer_nationalities?.trim() || null,
       source: "นำเข้า CSV",
+      segment,
       status,
     }));
   const { data, error } = await supabase.from("leads").upsert(clean, { onConflict: "phone,condo", ignoreDuplicates: true }).select("id");

@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 /**
  * รับลีดจากระบบภายนอก (n8n / Make / Zapier / สคริปต์ดึงประกาศ)
  * POST /api/leads/ingest   header: x-ingest-key: <INGEST_API_KEY>
- * body: { owner_name, phone, condo, unit?, rent?, source?, customer_nationalities?, viewing_when? }  หรือ array
+ * body: { owner_name, phone, condo, unit?, rent?, source?, customer_nationalities?, viewing_when?, segment?: "new"|"old" }  หรือ array
  */
 export async function POST(req: NextRequest) {
   if (!process.env.INGEST_API_KEY || req.headers.get("x-ingest-key") !== process.env.INGEST_API_KEY) {
@@ -26,6 +26,7 @@ export async function POST(req: NextRequest) {
       source: x.source ? String(x.source) : "API",
       customer_nationalities: x.customer_nationalities ?? null,
       viewing_when: x.viewing_when ?? null,
+      segment: x.segment === "old" ? "old" : "new",
     }));
   if (!rows.length) return NextResponse.json({ error: "ต้องมี owner_name, phone, condo" }, { status: 400 });
 

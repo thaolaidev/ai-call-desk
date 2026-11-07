@@ -24,7 +24,7 @@ export async function tick(): Promise<TickReport> {
   // 1a) ปิดสายจำลองที่ครบเวลา
   const { data: due } = await db
     .from("calls")
-    .select("id, leads(condo, customer_nationalities, viewing_when)")
+    .select("id, leads!calls_lead_id_fkey(condo, customer_nationalities, viewing_when)")
     .eq("provider", "simulate")
     .in("state", IN_FLIGHT)
     .lte("sim_end_at", new Date().toISOString());

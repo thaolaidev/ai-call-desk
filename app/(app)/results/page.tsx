@@ -23,13 +23,13 @@ export default async function ResultsPage({ searchParams }: { searchParams: SP }
   const outcome = sp.outcome && (OUTCOMES as string[]).includes(sp.outcome) ? sp.outcome : "all";
   const sb = await createClient();
 
-  let q = sb.from("calls").select("id, outcome, started_at, duration_sec, attempt, summary, leads(condo, owner_name)").eq("state", "ended").order("started_at", { ascending: false }).limit(150);
+  let q = sb.from("calls").select("id, outcome, started_at, duration_sec, attempt, summary, leads!calls_lead_id_fkey(condo, owner_name, segment)").eq("state", "ended").order("started_at", { ascending: false }).limit(150);
   if (outcome !== "all") q = q.eq("outcome", outcome);
   const { data: list, error } = await q;
 
   const selId = sp.id ?? list?.find((c: any) => isHot(c.outcome))?.id ?? list?.[0]?.id;
   const { data: c } = selId
-    ? await sb.from("calls").select("*, leads(*)").eq("id", selId).maybeSingle()
+    ? await sb.from("calls").select("*, leads!calls_lead_id_fkey(*)").eq("id", selId).maybeSingle()
     : { data: null };
   const lead = c ? (Array.isArray(c.leads) ? c.leads[0] : c.leads) : null;
   const link = (o: Record<string, string>) => {
