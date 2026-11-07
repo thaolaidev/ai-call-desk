@@ -3,6 +3,7 @@ import { applyCallResult } from "./outcome";
 import { simulateConversation, simulateProvider } from "./providers/simulate";
 import { vapiProvider } from "./providers/vapi";
 import { bkkClock, todayRangeBKK, toMinutes } from "./time";
+import { deliverResult, syncPending } from "./sync";
 
 const IN_FLIGHT = ["dialing", "ringing", "in_progress"];
 const STALE_MIN = 15; // สายที่ค้างนานเกินนี้ถือว่าล้มเหลว (เช่น webhook ไม่มา)
@@ -32,6 +33,7 @@ export async function tick(): Promise<TickReport> {
     const lead = Array.isArray(c.leads) ? c.leads[0] : c.leads;
     const sim = simulateConversation(lead, s);
     await applyCallResult(db, { callId: c.id, ...sim });
+    await deliverResult(db, c.id);
     report.finished++;
   }
 
@@ -42,6 +44,9 @@ export async function tick(): Promise<TickReport> {
     await applyCallResult(db, { callId: c.id, outcome: "noanswer", summary: "ไม่ได้รับผลจากระบบโทรภายใน 15 นาที", endedReason: "stale" });
     report.finished++;
   }
+
+  // 1c) ส่งผลการโทรที่ค้างกลับไปที่ VPS
+  await syncPending(db);
 
   // 2) เติมสาย
   if (!s.running) return { ...report, skipped: "แคมเปญหยุดอยู่" };

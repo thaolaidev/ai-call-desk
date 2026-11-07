@@ -16,6 +16,7 @@ export async function updateCampaign(formData: FormData) {
       retry_gap_min: Math.max(15, Number(formData.get("retry_gap_min")) || 120),
       max_attempts: Math.min(10, Math.max(1, Number(formData.get("max_attempts")) || 3)),
       auto_queue: formData.get("auto_queue") === "on",
+      stale_days: Math.min(365, Math.max(1, Number(formData.get("stale_days")) || 30)),
     })
     .eq("id", 1);
   revalidatePath("/calling");

@@ -130,7 +130,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
                   {tab !== "today" && <th><SelectAll /></th>}
                   <th>คอนโด / ห้อง</th><th>เจ้าของ</th><th>ค่าเช่า</th><th>เบอร์โทร</th>
                   <th>{tab === "today" ? "โทรเมื่อ" : tab === "called" ? "โทรล่าสุด" : "เข้ามาเมื่อ"}</th>
-                  <th>สถานะ</th><th>ครั้งที่โทร</th><th>สรุปจาก AI</th><th></th>
+                  <th>บนเว็บ (VPS)</th><th>สถานะการโทร</th><th>ครั้งที่โทร</th><th>สรุปจาก AI</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -148,6 +148,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
                         ? l.status === "calling" ? "กำลังโทร" : l.next_call_at ? `${fmtTime(l.next_call_at)} น.` : "ตามคิว"
                         : tab === "called" ? fmtDateTime(l.last_called_at) : fmtDateTime(l.created_at)}
                     </td>
+                    <td className="small">{l.vps_status ?? "–"}<br /><span className="muted">{l.vps_updated_at ? `อัปเดต ${fmtDateTime(l.vps_updated_at)}` : "ไม่มีวันที่"}</span></td>
                     <td><Pill status={l.status} /></td>
                     <td className="mono">{l.attempts}</td>
                     <td><p className={`clamp ${l.last_summary ? "" : "muted"}`}>{l.last_summary ?? "ยังไม่ได้โทร"}</p></td>
@@ -155,7 +156,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
                   </tr>
                 ))}
                 {!leads?.length && (
-                  <tr><td colSpan={10} className="empty">
+                  <tr><td colSpan={11} className="empty">
                     {tab === "today" ? `ยังไม่มี${SEG_LABEL[seg]}ที่จะโทรวันนี้ · ไปที่แท็บ "ทั้งหมด" เพื่อเลือกส่งเข้าคิว` : "ไม่พบห้องที่ตรงกับตัวกรอง"}
                   </td></tr>
                 )}

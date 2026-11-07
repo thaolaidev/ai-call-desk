@@ -83,6 +83,7 @@ export async function applyCallResult(db: SupabaseClient, r: CallResult) {
       next_call_at: nextCallAt,
       last_summary: summary,
       last_call_id: r.callId,
+      last_called_at: call.started_at,
       line_id: typeof a.line_id === "string" ? a.line_id : lead.line_id,
       current_lease_until: typeof a.current_lease_until === "string" ? a.current_lease_until : lead.current_lease_until,
     })
