@@ -4,7 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 
 export async function updateSettings(formData: FormData) {
   const supabase = await createClient();
-  const provider = formData.get("provider") === "vapi" ? "vapi" : "simulate";
+  const p = String(formData.get("provider"));
+  const provider = p === "vapi" || p === "yalecom" ? p : "simulate";
   await supabase
     .from("settings")
     .update({
@@ -14,7 +15,27 @@ export async function updateSettings(formData: FormData) {
       viewing_when: String(formData.get("viewing_when") || "วันนี้"),
       vapi_assistant_id: String(formData.get("vapi_assistant_id") || "") || null,
       vapi_phone_number_id: String(formData.get("vapi_phone_number_id") || "") || null,
+      yalecom_caller_id: String(formData.get("yalecom_caller_id") || "").replace(/[^\d]/g, "") || null,
+      yalecom_transfer_to: String(formData.get("yalecom_transfer_to") || "").trim() || null,
+      audio_intro: String(formData.get("audio_intro") || "tl_intro").trim(),
+      audio_question: String(formData.get("audio_question") || "tl_question").trim(),
+      audio_generic_intro: String(formData.get("audio_generic_intro") || "tl_intro_generic").trim(),
     })
     .eq("id", 1);
+  revalidatePath("/settings");
+}
+
+/** บันทึกคำอ่านชื่อคอนโด + สถานะว่าอัปโหลดไฟล์เสียงเข้า Yalecom แล้วหรือยัง */
+export async function saveCondoAudio(formData: FormData) {
+  const supabase = await createClient();
+  const condo = String(formData.get("condo") || "");
+  if (!condo) return;
+  await supabase.from("condo_audio").upsert({
+    condo,
+    tts_text: String(formData.get("tts_text") || "").trim() || null,
+    file_name: String(formData.get("file_name") || ""),
+    ready: formData.get("ready") === "on",
+    updated_at: new Date().toISOString(),
+  });
   revalidatePath("/settings");
 }

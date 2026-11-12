@@ -6,12 +6,13 @@ const BACKOFF_MIN = [1, 5, 15, 60, 180];
 
 /** ผลการโทร → สถานะห้องบน VPS (null = ยืนยันไม่ได้ ให้ VPS คงสถานะเดิม) */
 export const VPS_STATUS: Record<string, "ว่าง" | "ไม่ว่าง" | null> = {
-  avail_ok: "ว่าง", avail_profile: "ว่าง", avail_no: "ว่าง", not_avail: "ไม่ว่าง",
-  callback: null, noanswer: null, invalid: null, wrong_number: null, dnc: null,
+  avail: "ว่าง", avail_ok: "ว่าง", avail_profile: "ว่าง", avail_no: "ว่าง", not_avail: "ไม่ว่าง",
+  callback: null, noanswer: null, unclear: null, invalid: null, wrong_number: null, dnc: null,
 };
 
 const FAIL_NOTE: Record<string, string> = {
   noanswer: "โทรแล้วไม่รับสาย",
+  unclear: "รับสายแต่ไม่ได้คำตอบที่ชัดเจน",
   invalid: "โทรแล้วติดต่อไม่ได้ (เบอร์ปิดหรือไม่มีในระบบ)",
   wrong_number: "โทรแล้วคนรับไม่ใช่เจ้าของ ต้องตรวจเบอร์",
   callback: "เจ้าของไม่สะดวกคุย ขอให้โทรกลับ",
@@ -26,7 +27,7 @@ const FAIL_NOTE: Record<string, string> = {
 export function buildResultPayload(call: any, lead: any, sentAt = new Date().toISOString()) {
   const a = (call.analysis ?? {}) as Record<string, any>;
   const status = VPS_STATUS[call.outcome] ?? null;
-  const willRetry = call.to_status === "noanswer" || call.to_status === "callback";
+  const willRetry = call.to_status === "noanswer" || call.to_status === "unclear" || call.to_status === "callback";
   const note = status
     ? call.summary ?? null
     : `${FAIL_NOTE[call.outcome] ?? "โทรแล้วติดต่อไม่ได้"} (ครั้งที่ ${call.attempt})${willRetry ? " ระบบจะโทรใหม่อัตโนมัติ" : call.outcome === "dnc" ? "" : " รอดึงมาโทรใหม่รอบหน้า"}`;

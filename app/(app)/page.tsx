@@ -44,12 +44,12 @@ export default async function Dashboard() {
   for (const r of stats.data ?? []) {
     by[r.outcome] = Number(r.n);
     n += Number(r.n);
-    if (!["noanswer", "invalid", "pending", "failed"].includes(r.outcome)) talk += Number(r.talk_sec);
+    if (!["noanswer", "invalid", "unclear", "pending", "failed"].includes(r.outcome)) talk += Number(r.talk_sec);
     cost += Number(r.cost);
   }
   const g = (k: string) => by[k] ?? 0;
   const ended = n - g("pending") - g("failed");
-  const fail = g("noanswer") + g("invalid");
+  const fail = g("noanswer") + g("invalid") + g("unclear");
   const conn = ended - fail;
   const avail = g("avail_ok") + g("avail_profile") + g("avail_no");
   const hand = g("avail_ok") + g("avail_profile");
@@ -70,7 +70,7 @@ export default async function Dashboard() {
         <div className="kpis">
           <div className="card kpi ac"><span className="lbl">โทรแล้ววันนี้</span><span className="val">{n}<small> / {s.daily_cap}</small></span><div className="bar"><i style={{ width: `${Math.min(100, (n / s.daily_cap) * 100)}%` }} /></div></div>
           <div className="card kpi ok"><span className="lbl">โทรสำเร็จ (คุยกับเจ้าของได้)</span><span className="val">{conn}</span><span className="sub">{pct(conn)}% ของสายที่จบแล้ว</span></div>
-          <div className="card kpi wa"><span className="lbl">ไม่สำเร็จ</span><span className="val">{fail}</span><span className="sub">ไม่รับสาย {g("noanswer")} · ติดต่อไม่ได้ {g("invalid")}{g("failed") ? ` · ระบบโทรผิดพลาด ${g("failed")}` : ""}</span></div>
+          <div className="card kpi wa"><span className="lbl">ไม่สำเร็จ</span><span className="val">{fail}</span><span className="sub">ไม่รับสาย {g("noanswer")} · ฟังไม่ชัด {g("unclear")} · ติดต่อไม่ได้ {g("invalid")}{g("failed") ? ` · ระบบโทรผิดพลาด ${g("failed")}` : ""}</span></div>
           <div className="card kpi ok"><span className="lbl">ห้องว่าง</span><span className="val">{avail}</span><span className="sub">ไม่ว่าง {g("not_avail")} ห้อง</span></div>
           <div className="card kpi ok"><span className="lbl">ส่งต่อแอดมิน</span><span className="val">{hand}</span><span className="sub">รับต่างชาติ {g("avail_ok")} · ขอดูโปรไฟล์ {g("avail_profile")}</span></div>
           <div className="card kpi cb"><span className="lbl">ว่าง แต่ไม่รับต่างชาติ</span><span className="val">{g("avail_no")}</span><span className="sub">ฟังกฎแล้วยังไม่รับ</span></div>

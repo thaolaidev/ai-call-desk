@@ -6,6 +6,7 @@ import { prettyPhone } from "@/lib/phone";
 import { fmtDateTime, fmtDur, fmtTime } from "@/lib/time";
 import { Top } from "@/components/Top";
 import { Pill } from "@/components/Pill";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 type SP = Promise<{ outcome?: string; id?: string }>;
@@ -14,6 +15,7 @@ const FIELD_LABEL: Record<string, string> = {
   room_available: "ห้องว่าง", accepts_foreigners: "รับต่างชาติ", rules_explained: "อธิบายกฎแล้ว", owner_agreed_profile: "ยอมดูโปรไฟล์",
   profile_channel: "ส่งโปรไฟล์ทาง", line_id: "LINE ID", nationality_note: "เงื่อนไขสัญชาติ", current_lease_until: "ผู้เช่าเดิมถึง",
   callback_at: "นัดโทรกลับ", owner_questions: "คำถามที่ต้องตอบต่อ", sentiment: "ท่าทีเจ้าของ",
+  answer_text: "คำตอบที่ถอดได้", transcript_full: "ข้อความทั้งหมด",
 };
 const fmtVal = (v: unknown) =>
   v === true ? "ใช่" : v === false ? "ไม่" : Array.isArray(v) ? (v.length ? v.join(", ") : null) : v == null || v === "" ? null : String(v);
@@ -32,6 +34,11 @@ export default async function ResultsPage({ searchParams }: { searchParams: SP }
     ? await sb.from("calls").select("*, leads!calls_lead_id_fkey(*)").eq("id", selId).maybeSingle()
     : { data: null };
   const lead = c ? (Array.isArray(c.leads) ? c.leads[0] : c.leads) : null;
+  let audioUrl: string | null = c?.recording_url ?? null;
+  if (c?.recording_path) {
+    const { data: signed } = await createAdminClient().storage.from("recordings").createSignedUrl(c.recording_path, 3600);
+    audioUrl = signed?.signedUrl ?? null;
+  }
   const link = (o: Record<string, string>) => {
     const p = new URLSearchParams({ ...(outcome !== "all" ? { outcome } : {}), ...o });
     if (p.get("outcome") === "all") p.delete("outcome");
@@ -96,7 +103,7 @@ export default async function ResultsPage({ searchParams }: { searchParams: SP }
                       <span className="muted">อัปเดตสถานะห้อง:</span><Pill status={c.from_status ?? "queued"} /><span aria-hidden="true">→</span><Pill status={c.to_status} />
                     </div>
                   </div>
-                  {c.recording_url && <audio controls preload="none" src={c.recording_url} style={{ width: "100%" }} />}
+                  {audioUrl && <audio controls preload="none" src={audioUrl} style={{ width: "100%" }} />}
                   <div>
                     <h3 style={{ marginBottom: 10 }}>บทสนทนา (ถอดจากเสียง)</h3>
                     <div className="chat">

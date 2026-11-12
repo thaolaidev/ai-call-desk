@@ -2,6 +2,8 @@ import { createAdminClient } from "./supabase/admin";
 import { applyCallResult } from "./outcome";
 import { simulateConversation, simulateProvider } from "./providers/simulate";
 import { vapiProvider } from "./providers/vapi";
+import { yalecomProvider } from "./providers/yalecom";
+import { pollYalecom } from "./ivr";
 import { bkkClock, todayRangeBKK, toMinutes } from "./time";
 import { deliverResult, syncPending } from "./sync";
 
@@ -45,7 +47,10 @@ export async function tick(): Promise<TickReport> {
     report.finished++;
   }
 
-  // 1c) ส่งผลการโทรที่ค้างกลับไปที่ VPS
+  // 1c) สาย Yalecom ที่ callback ยังไม่มา: ถาม CDR เอง
+  report.finished += await pollYalecom(db).catch(() => 0);
+
+  // 1d) ส่งผลการโทรที่ค้างกลับไปที่ VPS
   await syncPending(db);
 
   // 2) เติมสาย
@@ -67,7 +72,7 @@ export async function tick(): Promise<TickReport> {
   const { data: leads, error: ce } = await db.rpc("claim_leads", { p_limit: slots });
   if (ce) return { ...report, errors: [ce.message] };
 
-  const provider = s.provider === "vapi" ? vapiProvider : simulateProvider;
+  const provider = s.provider === "vapi" ? vapiProvider : s.provider === "yalecom" ? yalecomProvider : simulateProvider;
   for (const lead of leads ?? []) {
     const { data: call, error } = await db
       .from("calls")

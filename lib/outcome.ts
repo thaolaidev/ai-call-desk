@@ -18,6 +18,8 @@ export type CallResult = {
 };
 
 const NEXT_ACTION: Record<Outcome, string> = {
+  avail: "close",
+  unclear: "retry_later",
   avail_ok: "send_profile",
   avail_profile: "send_profile",
   avail_no: "offer_thai_only",
@@ -46,7 +48,7 @@ export async function applyCallResult(db: SupabaseClient, r: CallResult) {
   let status: LeadStatus = r.outcome;
   let nextCallAt: string | null = null;
 
-  if (r.outcome === "noanswer") {
+  if (r.outcome === "noanswer" || r.outcome === "unclear") {
     if (attempts >= (s?.max_attempts ?? 3)) status = "closed";
     else nextCallAt = new Date(now + (s?.retry_gap_min ?? 120) * 60_000).toISOString();
   }

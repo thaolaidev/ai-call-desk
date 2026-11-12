@@ -16,7 +16,7 @@ type Seg = "new" | "old";
 type Tab = "today" | "called" | "all";
 const SEG_LABEL: Record<Seg, string> = { new: "ทรัพย์ใหม่", old: "ทรัพย์เก่า" };
 const TAB_LABEL: Record<Tab, string> = { today: "จะโทรวันนี้", called: "โทรแล้ว · อัปเดตสถานะแล้ว", all: "ทั้งหมด" };
-const RESULT_STATUSES = ["avail_ok", "avail_profile", "avail_no", "not_avail", "callback", "noanswer", "invalid", "wrong_number", "dnc", "closed"];
+const RESULT_STATUSES = ["avail", "avail_ok", "avail_profile", "avail_no", "not_avail", "callback", "noanswer", "unclear", "invalid", "wrong_number", "dnc", "closed"];
 
 type SP = Promise<{ seg?: string; tab?: string; status?: string; q?: string; page?: string }>;
 
@@ -69,7 +69,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
     return `/leads${p.size ? `?${p}` : ""}`;
   };
   const pages = Math.max(1, Math.ceil((count ?? 0) / PER));
-  const chipStatuses = tab === "today" ? ["queued", "calling", "noanswer", "callback"] : tab === "called" ? RESULT_STATUSES : ["new", "queued", ...RESULT_STATUSES];
+  const chipStatuses = tab === "today" ? ["queued", "calling", "noanswer", "unclear", "callback"] : tab === "called" ? RESULT_STATUSES : ["new", "queued", ...RESULT_STATUSES];
 
   return (
     <>
