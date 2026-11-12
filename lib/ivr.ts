@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { applyCallResult } from "./outcome";
 import { deliverResult } from "./sync";
 import { analyzeAnswer } from "./stt";
-import { downloadRecording, findCdrByRef, mapCallResult, type Cdr } from "./yalecom";
+import { downloadRecording, findCdrByRef, mapCallResult, yalecomTime, type Cdr } from "./yalecom";
 
 const IN_FLIGHT = ["dialing", "ringing", "in_progress"];
 const RECORDING_WAIT_MIN = 10; // รอไฟล์บันทึกเสียงได้นานสุดกี่นาทีหลังจบสาย
@@ -24,7 +24,8 @@ export async function processYalecomCall(db: SupabaseClient, callId: string, cdr
   if (!claimed) return "skipped";
 
   const result = mapCallResult(cdr.call_result);
-  const duration = Number(cdr.call_duration ?? cdr.duration ?? 0) || null;
+  const rawDur = cdr.call_duration ?? cdr.duration;
+  const duration = rawDur == null || rawDur === "" || Number.isNaN(Number(rawDur)) ? null : Number(rawDur);
 
   if (result !== "answered") {
     await applyCallResult(db, {
@@ -39,9 +40,23 @@ export async function processYalecomCall(db: SupabaseClient, callId: string, cdr
     return "done";
   }
 
+  // รับสายแต่ไม่มีเสียงสนทนาเลย (เช่น โอนสายไม่สำเร็จ) → ไม่ต้องรอไฟล์เสียง
+  if (duration === 0) {
+    await applyCallResult(db, {
+      callId,
+      outcome: "unclear",
+      durationSec: 0,
+      summary: `รับสายแต่ไม่มีเสียงสนทนา (โอนไป ${cdr.destination_number ?? "-"} ไม่สำเร็จ หรือวางสายทันที)`,
+      endedReason: "answered_no_talk",
+      transcript: [{ role: "system", text: "Yalecom: Answered แต่ duration = 0 วินาที ไม่มีไฟล์เสียง" }],
+    });
+    await deliverResult(db, callId);
+    return "done";
+  }
+
   const audio = await downloadRecording(cdr.xml_cdr_uuid);
   if (!audio) {
-    const endedMs = Date.parse(String(cdr.end_stamp ?? "")) || Date.now();
+    const endedMs = yalecomTime(cdr.end_stamp) || Date.now();
     if (Date.now() - endedMs < RECORDING_WAIT_MIN * 60_000) {
       await db.from("calls").update({ ended_reason: "waiting_recording" }).eq("id", callId);
       return "waiting";

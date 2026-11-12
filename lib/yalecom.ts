@@ -89,3 +89,11 @@ export function condoFileName(condo: string) {
   for (const ch of condo.trim().toLowerCase()) { h ^= ch.codePointAt(0)!; h = Math.imul(h, 16777619) >>> 0; }
   return `tl_condo_${h.toString(16).padStart(8, "0")}`;
 }
+
+/** เวลาใน CDR ของ Yalecom เป็นเวลาไทยแบบไม่มีเขตเวลา ("2026-11-12 18:27:06") → ms */
+export function yalecomTime(v?: unknown): number {
+  const t = String(v ?? "").trim();
+  if (!t) return NaN;
+  if (/[zZ]|[+-]\d\d:?\d\d$/.test(t)) return Date.parse(t);
+  return Date.parse(t.replace(" ", "T") + "+07:00");
+}
