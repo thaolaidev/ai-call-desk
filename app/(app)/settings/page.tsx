@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Top } from "@/components/Top";
 import { CopyButton } from "@/components/CopyButton";
+import { TestCallForm } from "@/components/TestCallForm";
 import { FIRST_MESSAGE, SYSTEM_PROMPT, ANALYSIS_SCHEMA, SUMMARY_PROMPT } from "@/lib/prompt";
 import { updateSettings, saveCondoAudio } from "./actions";
 import { condoFileName } from "@/lib/yalecom";
@@ -72,6 +73,11 @@ export default async function SettingsPage() {
             <div className="field"><label htmlFor="audio_generic_intro">ไฟล์เปิดสายแบบไม่มีชื่อคอนโด</label><input id="audio_generic_intro" name="audio_generic_intro" defaultValue={s.audio_generic_intro ?? "tl_intro_generic"} /></div>
           </div>
         </form>
+
+        <div className="card">
+          <div className="card-h"><h2>โทรทดสอบ 1 สาย</h2><span className="hint">โทรหาเบอร์ที่ใส่เท่านั้น ไม่แตะคิว · ใช้ระบบโทรที่เลือกไว้ด้านบน</span></div>
+          <TestCallForm provider={s.provider} />
+        </div>
 
         <div className="card">
           <div className="card-h"><h2>สถานะการเชื่อมต่อ</h2><span className="hint">ค่าเหล่านี้ตั้งใน Environment Variables</span></div>

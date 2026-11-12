@@ -39,3 +39,16 @@ export async function saveCondoAudio(formData: FormData) {
   });
   revalidatePath("/settings");
 }
+
+export async function testCall(_: string | null, formData: FormData): Promise<string> {
+  const supabase = await createClient();
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return "กรุณาเข้าสู่ระบบ";
+  const { startTestCall } = await import("@/lib/testcall");
+  try {
+    const r = await startTestCall(String(formData.get("phone") || ""), String(formData.get("condo") || ""));
+    return `สั่งโทรแล้ว (${r.provider === "yalecom" ? "Yalecom" : r.provider === "vapi" ? "Vapi" : "โหมดจำลอง"}) · รอสายจบแล้วดูผลที่หน้า "ผลการโทร"`;
+  } catch (e) {
+    return `โทรไม่สำเร็จ: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
