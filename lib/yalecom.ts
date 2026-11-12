@@ -36,13 +36,33 @@ export type Cdr = {
   start_stamp?: string; end_stamp?: string; recording?: string; ref_1?: string; ref_2?: string; [k: string]: unknown;
 };
 
-/** หา CDR ของสายเราด้วย ref_1 (ใช้เป็นทางสำรองเมื่อ callback ไม่มา) */
+/** ดึง CDR ดิบ (ใช้ทั้งค้นหาและหน้าตรวจสอบ) */
+export async function fetchCdr(params: Record<string, string | undefined>) {
+  const res = await fetch(url("/api/cdr", params), { signal: AbortSignal.timeout(15_000) });
+  const text = await res.text();
+  let body: any = null;
+  try { body = JSON.parse(text); } catch {}
+  return { status: res.status, body, text: body ? null : text.slice(0, 500) };
+}
+
+export function cdrList(body: any): Cdr[] {
+  if (Array.isArray(body)) return body;
+  for (const k of ["data", "result", "results", "records", "cdr"]) {
+    const v = body?.[k];
+    if (Array.isArray(v)) return v;
+    if (Array.isArray(v?.data)) return v.data;
+  }
+  return [];
+}
+
+/** หา CDR ของสายเราด้วย ref_1 (ต้องตรงเท่านั้น ห้ามเดา) */
 export async function findCdrByRef(ref1: string): Promise<Cdr | null> {
-  const res = await fetch(url("/api/cdr", { ref_1: ref1, direction: "outbound" }), { signal: AbortSignal.timeout(15_000) });
-  if (!res.ok) return null;
-  const body = await res.json().catch(() => null);
-  const list: Cdr[] = Array.isArray(body) ? body : Array.isArray(body?.data) ? body.data : [];
-  return list.find((c) => String(c.ref_1 ?? "") === ref1) ?? list[0] ?? null;
+  const byRef = await fetchCdr({ ref_1: ref1 });
+  const hit = cdrList(byRef.body).find((c) => String(c.ref_1 ?? "") === ref1);
+  if (hit) return hit;
+  // บางระบบไม่กรองด้วย ref_1 ให้: ไล่ดูรายการล่าสุด 100 รายการ
+  const latest = await fetchCdr({});
+  return cdrList(latest.body).find((c) => String(c.ref_1 ?? "") === ref1) ?? null;
 }
 
 /** ดาวน์โหลดไฟล์บันทึกเสียง (MP3) */
