@@ -38,7 +38,7 @@ export type Cdr = {
 
 /** ดึง CDR ดิบ (ใช้ทั้งค้นหาและหน้าตรวจสอบ) */
 export async function fetchCdr(params: Record<string, string | undefined>) {
-  const res = await fetch(url("/api/cdr", params), { signal: AbortSignal.timeout(15_000) });
+  const res = await fetch(url("/api/cdr", params), { signal: AbortSignal.timeout(8_000) });
   const text = await res.text();
   let body: any = null;
   try { body = JSON.parse(text); } catch {}
@@ -57,12 +57,9 @@ export function cdrList(body: any): Cdr[] {
 
 /** หา CDR ของสายเราด้วย ref_1 (ต้องตรงเท่านั้น ห้ามเดา) */
 export async function findCdrByRef(ref1: string): Promise<Cdr | null> {
+  // Yalecom กรองด้วย ref_1 ได้ (ยืนยันจากสายทดสอบแล้ว) จึงถามครั้งเดียวพอ
   const byRef = await fetchCdr({ ref_1: ref1 });
-  const hit = cdrList(byRef.body).find((c) => String(c.ref_1 ?? "") === ref1);
-  if (hit) return hit;
-  // บางระบบไม่กรองด้วย ref_1 ให้: ไล่ดูรายการล่าสุด 100 รายการ
-  const latest = await fetchCdr({});
-  return cdrList(latest.body).find((c) => String(c.ref_1 ?? "") === ref1) ?? null;
+  return cdrList(byRef.body).find((c) => String(c.ref_1 ?? "") === ref1) ?? null;
 }
 
 /** ดาวน์โหลดไฟล์บันทึกเสียง (MP3) */

@@ -65,7 +65,7 @@ export default async function Dashboard() {
         <span className="chip"><span className={`dot ${s.running ? "live" : ""}`} />{s.running ? "กำลังโทร" : "หยุดอยู่"} · {s.provider === "simulate" ? "โหมดจำลอง" : s.provider === "yalecom" ? "Yalecom" : "Vapi"}</span>
         <RunButton running={s.running} />
       </Top>
-      <AutoRefresh ms={8000} ping={s.running || (inflight.count ?? 0) > 0} />
+      <AutoRefresh ms={15000} ping={s.running || (inflight.count ?? 0) > 0} />
       <div className="view">
         <div className="kpis">
           <div className="card kpi ac"><span className="lbl">โทรแล้ววันนี้</span><span className="val">{n}<small> / {s.daily_cap}</small></span><div className="bar"><i style={{ width: `${Math.min(100, (n / s.daily_cap) * 100)}%` }} /></div></div>

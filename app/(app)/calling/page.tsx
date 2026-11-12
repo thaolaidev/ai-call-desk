@@ -32,7 +32,7 @@ export default async function CallingPage() {
         <span className="chip"><span className={`dot ${s.running ? "live" : ""}`} />{s.provider === "simulate" ? "โหมดจำลอง" : s.provider === "yalecom" ? "Yalecom (โทรจริง)" : "Vapi (โทรจริง)"}</span>
         <RunButton running={s.running} />
       </Top>
-      <AutoRefresh ms={5000} ping={s.running || (live?.length ?? 0) > 0} />
+      <AutoRefresh ms={8000} ping={s.running || (live?.length ?? 0) > 0} />
       <div className="view">
         <div className="card">
           <div className="card-h"><h2>ความคืบหน้าวันนี้</h2><span className="mono">{done} / {s.daily_cap} สาย</span></div>

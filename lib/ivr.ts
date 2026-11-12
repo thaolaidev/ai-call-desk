@@ -99,7 +99,7 @@ export async function processYalecomCall(db: SupabaseClient, callId: string, cdr
 }
 
 /** ทางสำรอง: ถาม CDR ของ Yalecom ว่าสายที่ค้างจบหรือยัง (กรณี callback ไม่มา) */
-export async function pollYalecom(db: SupabaseClient, limit = 10) {
+export async function pollYalecom(db: SupabaseClient, limit = 5) {
   if (!process.env.YALECOM_COMPANY_ID || !process.env.YALECOM_KEY) return 0;
   const { data } = await db
     .from("calls")

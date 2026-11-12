@@ -1,1 +1,4 @@
-{ "crons": [{ "path": "/api/dialer/tick", "schedule": "0 2 * * *" }] }
+{
+  "regions": ["sin1"],
+  "crons": [{ "path": "/api/dialer/tick", "schedule": "0 2 * * *" }]
+}
