@@ -17,11 +17,16 @@ export async function updateSettings(formData: FormData) {
       vapi_phone_number_id: String(formData.get("vapi_phone_number_id") || "") || null,
       yalecom_caller_id: String(formData.get("yalecom_caller_id") || "").replace(/[^\d]/g, "") || null,
       yalecom_transfer_to: String(formData.get("yalecom_transfer_to") || "").trim() || null,
-      audio_intro: String(formData.get("audio_intro") || "tl_intro").trim(),
-      audio_question: String(formData.get("audio_question") || "tl_question").trim(),
-      audio_generic_intro: String(formData.get("audio_generic_intro") || "tl_intro_generic").trim(),
     })
     .eq("id", 1);
+  for (const seg of ["new", "old"]) {
+    const v = (k: string) => String(formData.get(`${k}_${seg}`) || "").trim();
+    if (!v("audio_intro")) continue;
+    await supabase
+      .from("call_rooms")
+      .update({ audio_intro: v("audio_intro"), audio_question: v("audio_question"), audio_generic_intro: v("audio_generic_intro") })
+      .eq("segment", seg);
+  }
   revalidatePath("/settings");
 }
 
@@ -46,7 +51,7 @@ export async function testCall(_: string | null, formData: FormData): Promise<st
   if (!auth.user) return "กรุณาเข้าสู่ระบบ";
   const { startTestCall } = await import("@/lib/testcall");
   try {
-    const r = await startTestCall(String(formData.get("phone") || ""), String(formData.get("condo") || ""));
+    const r = await startTestCall(String(formData.get("phone") || ""), String(formData.get("condo") || ""), formData.get("segment") === "new" ? "new" : "old");
     return `สั่งโทรแล้ว (${r.provider === "yalecom" ? "Yalecom" : r.provider === "vapi" ? "Vapi" : "โหมดจำลอง"}) · รอสายจบแล้วดูผลที่หน้า "ผลการโทร"`;
   } catch (e) {
     return `โทรไม่สำเร็จ: ${e instanceof Error ? e.message : String(e)}`;

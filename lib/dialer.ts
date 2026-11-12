@@ -53,8 +53,10 @@ export async function tick(): Promise<TickReport> {
   // 1d) ส่งผลการโทรที่ค้างกลับไปที่ VPS
   await syncPending(db);
 
-  // 2) เติมสาย
-  if (!s.running) return { ...report, skipped: "แคมเปญหยุดอยู่" };
+  // 2) เติมสายทีละห้อง (ทรัพย์ใหม่ / ทรัพย์เดิม)
+  const { data: rooms } = await db.from("call_rooms").select("*").order("segment");
+  const active = (rooms ?? []).filter((r: any) => r.running && r.concurrency > 0);
+  if (!active.length) return { ...report, skipped: "ทุกห้องหยุดอยู่" };
   const clock = bkkClock();
   if (!s.call_days.includes(clock.weekday)) return { ...report, skipped: "วันนี้ไม่ใช่วันโทร" };
   if (clock.minutes < toMinutes(s.call_start) || clock.minutes >= toMinutes(s.call_end)) {
@@ -62,43 +64,46 @@ export async function tick(): Promise<TickReport> {
   }
 
   const { from, to } = todayRangeBKK();
-  const [{ count: inflight }, { count: today }] = await Promise.all([
-    db.from("calls").select("id", { count: "exact", head: true }).in("state", IN_FLIGHT),
-    db.from("calls").select("id", { count: "exact", head: true }).gte("started_at", from).lt("started_at", to),
-  ]);
-  const slots = Math.min(s.concurrency - (inflight ?? 0), s.daily_cap - (today ?? 0));
-  if (slots <= 0) return { ...report, skipped: (today ?? 0) >= s.daily_cap ? "ครบเป้าวันนี้แล้ว" : "สายเต็ม" };
-
-  const { data: leads, error: ce } = await db.rpc("claim_leads", { p_limit: slots });
-  if (ce) return { ...report, errors: [ce.message] };
-
   const provider = s.provider === "vapi" ? vapiProvider : s.provider === "yalecom" ? yalecomProvider : simulateProvider;
-  for (const lead of leads ?? []) {
-    const { data: call, error } = await db
-      .from("calls")
-      .insert({ lead_id: lead.id, provider: provider.name, attempt: lead.attempts + 1, from_status: lead.prev_status })
-      .select("id")
-      .single();
-    if (error || !call) {
-      report.errors.push(error?.message ?? "insert call failed");
-      await db.from("leads").update({ status: lead.prev_status ?? "queued" }).eq("id", lead.id);
-      continue;
-    }
-    try {
-      const r = await provider.start({ callId: call.id, lead, settings: s });
-      await db
+
+  for (const room of active) {
+    const [{ count: inflight }, { count: today }] = await Promise.all([
+      db.from("calls").select("id", { count: "exact", head: true }).eq("segment", room.segment).in("state", IN_FLIGHT),
+      db.from("calls").select("id", { count: "exact", head: true }).eq("segment", room.segment).gte("started_at", from).lt("started_at", to),
+    ]);
+    const slots = Math.min(room.concurrency - (inflight ?? 0), room.daily_cap - (today ?? 0));
+    if (slots <= 0) continue;
+
+    const { data: leads, error: ce } = await db.rpc("claim_leads", { p_limit: slots, p_segment: room.segment });
+    if (ce) { report.errors.push(ce.message); continue; }
+
+    for (const lead of leads ?? []) {
+      const { data: call, error } = await db
         .from("calls")
-        .update({ provider_call_id: r.providerCallId ?? null, sim_end_at: r.simEndAt ?? null, state: provider.name === "simulate" ? "in_progress" : "dialing" })
-        .eq("id", call.id);
-      report.started++;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      report.errors.push(msg);
-      await db.from("calls").update({ state: "failed", ended_at: new Date().toISOString(), summary: msg }).eq("id", call.id);
-      await db.from("leads").update({ status: lead.prev_status ?? "queued" }).eq("id", lead.id);
-      // ถ้าเรียกระบบโทรไม่สำเร็จ หยุดแคมเปญไว้ก่อน ไม่ให้ยิงซ้ำรัวๆ
-      await db.from("settings").update({ running: false }).eq("id", 1);
-      break;
+        .insert({ lead_id: lead.id, provider: provider.name, attempt: lead.attempts + 1, from_status: lead.prev_status, segment: room.segment })
+        .select("id")
+        .single();
+      if (error || !call) {
+        report.errors.push(error?.message ?? "insert call failed");
+        await db.from("leads").update({ status: lead.prev_status ?? "queued" }).eq("id", lead.id);
+        continue;
+      }
+      try {
+        const r = await provider.start({ callId: call.id, lead, settings: s });
+        await db
+          .from("calls")
+          .update({ provider_call_id: r.providerCallId ?? null, sim_end_at: r.simEndAt ?? null, state: provider.name === "simulate" ? "in_progress" : "dialing" })
+          .eq("id", call.id);
+        report.started++;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        report.errors.push(`${room.name}: ${msg}`);
+        await db.from("calls").update({ state: "failed", ended_at: new Date().toISOString(), summary: msg }).eq("id", call.id);
+        await db.from("leads").update({ status: lead.prev_status ?? "queued" }).eq("id", lead.id);
+        // ระบบโทรมีปัญหา หยุดห้องนี้ไว้ก่อน ไม่ให้ยิงซ้ำรัวๆ
+        await db.from("call_rooms").update({ running: false }).eq("segment", room.segment);
+        break;
+      }
     }
   }
   return report;

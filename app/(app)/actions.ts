@@ -19,3 +19,16 @@ export async function toggleRunning() {
   if (running) await tick();
   revalidatePath("/", "layout");
 }
+
+/** เริ่ม/หยุดห้องโทรห้องเดียว (ทรัพย์ใหม่ หรือ ทรัพย์เดิม) */
+export async function toggleRoom(formData: FormData) {
+  const supabase = await createClient();
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return;
+  const segment = formData.get("segment") === "new" ? "new" : "old";
+  const { data } = await supabase.from("call_rooms").select("running").eq("segment", segment).single();
+  const running = !data?.running;
+  await supabase.from("call_rooms").update({ running, updated_at: new Date().toISOString() }).eq("segment", segment);
+  if (running) await tick();
+  revalidatePath("/", "layout");
+}

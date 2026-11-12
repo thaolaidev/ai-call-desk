@@ -4,13 +4,21 @@ import { CopyButton } from "@/components/CopyButton";
 import { TestCallForm } from "@/components/TestCallForm";
 import { FIRST_MESSAGE, SYSTEM_PROMPT, ANALYSIS_SCHEMA, SUMMARY_PROMPT } from "@/lib/prompt";
 import { updateSettings, saveCondoAudio } from "./actions";
+import { updateCampaign } from "../calling/actions";
+
+const DAYS = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
 import { condoFileName } from "@/lib/yalecom";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const sb = await createClient();
-  const { data: s, error } = await sb.from("settings").select("*").eq("id", 1).single();
+  const [{ data: s, error }, { data: roomRows }] = await Promise.all([
+    sb.from("settings").select("*").eq("id", 1).single(),
+    sb.from("call_rooms").select("*").order("segment"),
+  ]);
+  const rooms: any[] = roomRows ?? [];
+  const room = (seg: string) => rooms.find((r) => r.segment === seg) ?? {};
   if (error || !s) return <div className="view"><p className="banner err">{error?.message ?? "ไม่พบ settings"}</p></div>;
 
   const site = process.env.NEXT_PUBLIC_SITE_URL ?? "https://your-app.vercel.app";
@@ -48,6 +56,35 @@ export default async function SettingsPage() {
     <>
       <Top title="ตั้งค่าระบบ" sub="ระบบโทร บทของเอเจนต์ และการเชื่อมต่อ" />
       <div className="view">
+        <form className="card" action={updateCampaign} id="campaign">
+          <div className="card-h"><h2>ตั้งค่าการโทร</h2><button className="btn sm primary">บันทึก</button></div>
+          <div className="card-b form-grid">
+            {["new", "old"].map((seg) => (
+              <div key={seg} className="field" style={{ gridColumn: "span 1" }}>
+                <label>{seg === "new" ? "ห้องทรัพย์ใหม่" : "ห้องทรัพย์เดิม · อัปเดต"}: สายพร้อมกัน / เป้าต่อวัน</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input name={`concurrency_${seg}`} type="number" min={0} max={10} defaultValue={room(seg).concurrency ?? 3} aria-label="สายพร้อมกัน" style={{ width: "50%" }} />
+                  <input name={`daily_cap_${seg}`} type="number" min={0} defaultValue={room(seg).daily_cap ?? 100} aria-label="เป้าต่อวัน" style={{ width: "50%" }} />
+                </div>
+              </div>
+            ))}
+            <div className="field"><label htmlFor="call_start">เริ่มโทร</label><input id="call_start" name="call_start" type="time" defaultValue={String(s.call_start).slice(0, 5)} /></div>
+            <div className="field"><label htmlFor="call_end">หยุดโทร</label><input id="call_end" name="call_end" type="time" defaultValue={String(s.call_end).slice(0, 5)} /></div>
+            <div className="field"><label htmlFor="retry_gap_min">ไม่รับสาย: โทรซ้ำทุก (นาที)</label><input id="retry_gap_min" name="retry_gap_min" type="number" min={15} defaultValue={s.retry_gap_min} /></div>
+            <div className="field"><label htmlFor="max_attempts">โทรสูงสุด (ครั้ง)</label><input id="max_attempts" name="max_attempts" type="number" min={1} max={10} defaultValue={s.max_attempts} /></div>
+            <div className="field"><label htmlFor="stale_days">ทรัพย์เก่า: โทรเช็คเมื่อไม่ได้อัปเดตเกิน (วัน)</label><input id="stale_days" name="stale_days" type="number" min={1} max={365} defaultValue={s.stale_days ?? 30} /></div>
+            <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
+              <legend className="small muted" style={{ fontWeight: 500, marginBottom: 6 }}>วันที่โทร</legend>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                {DAYS.map((d, i) => (
+                  <label key={d} className="toggle"><input type="checkbox" name="call_days" value={i} defaultChecked={s.call_days.includes(i)} />{d}</label>
+                ))}
+              </div>
+            </fieldset>
+            <label className="toggle"><input type="checkbox" name="auto_queue" defaultChecked={s.auto_queue} />ส่งห้องใหม่เข้าคิวอัตโนมัติ</label>
+          </div>
+        </form>
+
         <form className="card" action={updateSettings}>
           <div className="card-h"><h2>ระบบโทรและข้อมูลในบท</h2><button className="btn sm primary">บันทึก</button></div>
           <div className="card-b form-grid">
@@ -68,9 +105,16 @@ export default async function SettingsPage() {
           <div className="card-b form-grid" style={{ borderTop: "1px solid var(--line)" }}>
             <div className="field"><label htmlFor="yalecom_caller_id">Yalecom: เบอร์โทรออก</label><input id="yalecom_caller_id" name="yalecom_caller_id" defaultValue={s.yalecom_caller_id ?? ""} placeholder="02xxxxxxx" /></div>
             <div className="field"><label htmlFor="yalecom_transfer_to">Yalecom: เบอร์ภายใน IVR (transfer_to)</label><input id="yalecom_transfer_to" name="yalecom_transfer_to" defaultValue={s.yalecom_transfer_to ?? ""} placeholder="ได้จาก Yalecom" /></div>
-            <div className="field"><label htmlFor="audio_intro">ไฟล์เปิดสาย (ก่อนชื่อคอนโด)</label><input id="audio_intro" name="audio_intro" defaultValue={s.audio_intro ?? "tl_intro"} /></div>
-            <div className="field"><label htmlFor="audio_question">ไฟล์คำถาม + เสียงสัญญาณ</label><input id="audio_question" name="audio_question" defaultValue={s.audio_question ?? "tl_question"} /></div>
-            <div className="field"><label htmlFor="audio_generic_intro">ไฟล์เปิดสายแบบไม่มีชื่อคอนโด</label><input id="audio_generic_intro" name="audio_generic_intro" defaultValue={s.audio_generic_intro ?? "tl_intro_generic"} /></div>
+            {["old", "new"].map((seg) => (
+              <div key={seg} className="field">
+                <label>ไฟล์เสียงห้อง{seg === "new" ? "ทรัพย์ใหม่" : "ทรัพย์เดิม"}: เปิดสาย / คำถาม / เปิดสายไม่มีชื่อคอนโด</label>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input name={`audio_intro_${seg}`} defaultValue={room(seg).audio_intro ?? ""} aria-label="ไฟล์เปิดสาย" style={{ width: "33%" }} />
+                  <input name={`audio_question_${seg}`} defaultValue={room(seg).audio_question ?? ""} aria-label="ไฟล์คำถาม" style={{ width: "33%" }} />
+                  <input name={`audio_generic_intro_${seg}`} defaultValue={room(seg).audio_generic_intro ?? ""} aria-label="ไฟล์เปิดสายไม่มีชื่อคอนโด" style={{ width: "33%" }} />
+                </div>
+              </div>
+            ))}
           </div>
         </form>
 

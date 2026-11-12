@@ -8,8 +8,6 @@ export async function updateCampaign(formData: FormData) {
   await supabase
     .from("settings")
     .update({
-      concurrency: Math.min(10, Math.max(1, Number(formData.get("concurrency")) || 8)),
-      daily_cap: Math.max(1, Number(formData.get("daily_cap")) || 200),
       call_start: String(formData.get("call_start") || "09:00"),
       call_end: String(formData.get("call_end") || "20:00"),
       call_days: days.length ? days : [1, 2, 3, 4, 5, 6],
@@ -19,5 +17,16 @@ export async function updateCampaign(formData: FormData) {
       stale_days: Math.min(365, Math.max(1, Number(formData.get("stale_days")) || 30)),
     })
     .eq("id", 1);
+  for (const seg of ["new", "old"]) {
+    await supabase
+      .from("call_rooms")
+      .update({
+        concurrency: Math.min(10, Math.max(0, Number(formData.get(`concurrency_${seg}`)) || 0)),
+        daily_cap: Math.max(0, Number(formData.get(`daily_cap_${seg}`)) || 0),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("segment", seg);
+  }
   revalidatePath("/calling");
+  revalidatePath("/settings");
 }

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 const ITEMS = [
   { href: "/", label: "แดชบอร์ด" },
   { href: "/leads", label: "กองลีด" },
-  { href: "/calling", label: "แคมเปญโทร" },
+  { href: "/calling", label: "ห้องโทร" },
   { href: "/results", label: "ผลการโทร" },
   { href: "/settings", label: "ตั้งค่าระบบ" },
 ];

@@ -5,7 +5,6 @@ import { prettyPhone } from "@/lib/phone";
 import { Top } from "@/components/Top";
 import { HourlyChart } from "@/components/HourlyChart";
 import { AutoRefresh } from "@/components/AutoRefresh";
-import { RunButton } from "@/components/RunButton";
 import { completeTask } from "./actions";
 import Link from "next/link";
 
@@ -26,6 +25,9 @@ export default async function Dashboard() {
     sb.from("admin_tasks").select("id, note, created_at, leads(condo, unit, rent, owner_name, phone)").eq("status", "open").order("created_at", { ascending: false }).limit(8),
     sb.rpc("lead_counts"),
   ]);
+  const { data: rooms } = await sb.from("call_rooms").select("segment, name, running, daily_cap");
+  const cap = (rooms ?? []).reduce((a: number, r: any) => a + (r.daily_cap ?? 0), 0) || (settings.data?.daily_cap ?? 200);
+  const anyRunning = (rooms ?? []).some((r: any) => r.running);
 
   if (settings.error) {
     return (
@@ -62,13 +64,15 @@ export default async function Dashboard() {
   return (
     <>
       <Top title="แดชบอร์ด" sub="ภาพรวมการโทรวันนี้">
-        <span className="chip"><span className={`dot ${s.running ? "live" : ""}`} />{s.running ? "กำลังโทร" : "หยุดอยู่"} · {s.provider === "simulate" ? "โหมดจำลอง" : s.provider === "yalecom" ? "Yalecom" : "Vapi"}</span>
-        <RunButton running={s.running} />
+        {(rooms ?? []).map((r: any) => (
+          <span key={r.segment} className="chip"><span className={`dot ${r.running ? "live" : ""}`} />{r.name}: {r.running ? "กำลังโทร" : "หยุด"}</span>
+        ))}
+        <Link className="btn primary" href="/calling">ไปห้องโทร</Link>
       </Top>
-      <AutoRefresh ms={15000} ping={s.running || (inflight.count ?? 0) > 0} />
+      <AutoRefresh ms={15000} ping={anyRunning || (inflight.count ?? 0) > 0} />
       <div className="view">
         <div className="kpis">
-          <div className="card kpi ac"><span className="lbl">โทรแล้ววันนี้</span><span className="val">{n}<small> / {s.daily_cap}</small></span><div className="bar"><i style={{ width: `${Math.min(100, (n / s.daily_cap) * 100)}%` }} /></div></div>
+          <div className="card kpi ac"><span className="lbl">โทรแล้ววันนี้</span><span className="val">{n}<small> / {cap}</small></span><div className="bar"><i style={{ width: `${Math.min(100, (n / cap) * 100)}%` }} /></div></div>
           <div className="card kpi ok"><span className="lbl">โทรสำเร็จ (คุยกับเจ้าของได้)</span><span className="val">{conn}</span><span className="sub">{pct(conn)}% ของสายที่จบแล้ว</span></div>
           <div className="card kpi wa"><span className="lbl">ไม่สำเร็จ</span><span className="val">{fail}</span><span className="sub">ไม่รับสาย {g("noanswer")} · ฟังไม่ชัด {g("unclear")} · ติดต่อไม่ได้ {g("invalid")}{g("failed") ? ` · ระบบโทรผิดพลาด ${g("failed")}` : ""}</span></div>
           <div className="card kpi ok"><span className="lbl">ห้องว่าง</span><span className="val">{avail}</span><span className="sub">ไม่ว่าง {g("not_avail")} ห้อง</span></div>
@@ -77,7 +81,7 @@ export default async function Dashboard() {
         </div>
 
         <div className="card livebar">
-          <span>กำลังโทร <b className="mono">{inflight.count ?? 0}</b> / {s.concurrency} สาย</span><span className="sep" />
+          <span>กำลังโทร <b className="mono">{inflight.count ?? 0}</b> สาย</span><span className="sep" />
           <span>รอในคิว <b className="mono">{queued}</b> ห้อง</span><span className="sep" />
           <span className="muted small">คุยเฉลี่ย <span className="mono">{fmtDur(conn ? Math.round(talk / conn) : 0)}</span> · ค่าโทรวันนี้ ~฿{Math.round(cost).toLocaleString("th-TH")}</span>
           <span style={{ marginLeft: "auto" }}><Link className="btn sm" href="/calling">ดูสายที่กำลังโทร</Link></span>
