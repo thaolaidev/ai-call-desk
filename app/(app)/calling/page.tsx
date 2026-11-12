@@ -79,7 +79,7 @@ export default async function CallingPage() {
                       const l = Array.isArray(c.leads) ? c.leads[0] : c.leads;
                       return (
                         <div key={c.id} className={`line ${c.state}`}>
-                          <div className="line-h"><b>สาย {i + 1}</b><span className="pill t-bad busy-pill">ไม่ว่าง</span></div>
+                          <div className="line-h"><b>สาย {i + 1}</b><span className="pill t-bad busy-pill">กำลังโทร</span></div>
                           <b>{l?.condo}</b>
                           <span className="small muted">คุณ{l?.owner_name} · <span className="mono">{l ? prettyPhone(l.phone) : ""}</span></span>
                           <span className="small muted">{STATE_LABEL[c.state]} · เริ่ม {fmtTime(c.started_at)} · ครั้งที่ {c.attempt}</span>
