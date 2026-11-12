@@ -43,6 +43,8 @@ button,input,select,textarea{font:inherit;color:inherit}
 .nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;color:var(--side-ink);text-decoration:none;font-weight:500;white-space:nowrap}
 .nav a:hover,.nav a.on{background:var(--side-sel);color:var(--side-hi)}
 .nav a.on{background:var(--side-on);color:var(--side-on-ink)}
+.nav-ic{flex:none;opacity:.85}
+.nav a.on .nav-ic{opacity:1}
 .side-foot{margin-top:auto;font-size:12.5px;display:flex;flex-direction:column;gap:8px}
 .side-foot button{background:none;border:1px solid var(--side-sel);color:var(--side-ink);border-radius:8px;padding:6px 10px;cursor:pointer;border-color:currentColor;opacity:.8}
 .main{overflow:auto;display:flex;flex-direction:column;min-width:0}
