@@ -84,3 +84,58 @@ export async function classify(fullText: string): Promise<Classified> {
     return classifyByKeywords(answer);
   }
 }
+
+/**
+ * Gemini: ฟังไฟล์เสียงทั้งสาย → ถอดเสียง + แยกคำตอบเจ้าของ + จัดผล ในคำขอเดียว
+ * ใช้เมื่อมี GEMINI_API_KEY (ถ้าไม่มี ใช้ OpenAI / จับคำ ตามเดิม)
+ */
+export async function analyzeWithGemini(audio: ArrayBuffer): Promise<(Classified & { transcript: string }) | null> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return null;
+  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const prompt =
+    "นี่คือไฟล์เสียงโทรศัพท์ภาษาไทย ช่วงแรกเป็นเสียงอัดของบริษัท Thaolai.com ถามเจ้าของว่าห้องคอนโดยังว่างไหม เสียงอัดจบด้วยคำว่า \"ได้เลยค่ะ\" หลังจากนั้นคือคำตอบของเจ้าของห้อง\n" +
+    "1) ถอดเสียงทั้งไฟล์เป็นข้อความ\n2) แยกเฉพาะคำพูดของเจ้าของห้อง (ไม่รวมเสียงอัดของบริษัท) ถ้าเจ้าของพูดแทรกระหว่างเสียงอัดให้นับด้วย\n" +
+    "3) จัดผล: avail = ห้องยังว่าง · not_avail = ไม่ว่าง/มีคนเช่า/ขายแล้ว · callback = ขอให้โทรมาใหม่ · dnc = ขอไม่ให้ติดต่อ/ไม่ฝากเอเจนต์ · wrong_number = ไม่ใช่เจ้าของ · unclear = ไม่ตอบหรือฟังไม่ออก\n" +
+    "ห้ามนับคำว่า ว่าง/ไม่ว่าง ที่อยู่ในเสียงอัดของบริษัท ห้ามเดา\n" +
+    'ตอบเป็น JSON เท่านั้น: {"transcript": string, "owner_answer": string, "outcome": "avail|not_avail|callback|dnc|wrong_number|unclear", "current_lease_until": string|null, "summary_th": string}';
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+    signal: AbortSignal.timeout(60_000),
+    body: JSON.stringify({
+      contents: [{ parts: [{ inline_data: { mime_type: "audio/mp3", data: Buffer.from(audio).toString("base64") } }, { text: prompt }] }],
+      generationConfig: { temperature: 0, responseMimeType: "application/json" },
+    }),
+  });
+  if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const body = await res.json();
+  const text = body?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "{}";
+  const j = JSON.parse(text.replace(/^```json\s*|\s*```$/g, ""));
+  const allowed: Outcome[] = ["avail", "not_avail", "callback", "dnc", "wrong_number", "unclear"];
+  return {
+    outcome: allowed.includes(j.outcome) ? (j.outcome as Outcome) : "unclear",
+    summary: String(j.summary_th ?? ""),
+    current_lease_until: j.current_lease_until ?? null,
+    answer_text: String(j.owner_answer ?? ""),
+    transcript: String(j.transcript ?? ""),
+  };
+}
+
+/** เลือกตัววิเคราะห์ตามคีย์ที่มี: Gemini → OpenAI → จับคำ */
+export async function analyzeAnswer(audio: ArrayBuffer | null): Promise<Classified & { transcript: string; error: string | null }> {
+  if (!audio) return { ...classifyByKeywords(""), transcript: "", error: null };
+  try {
+    const g = await analyzeWithGemini(audio);
+    if (g) return { ...g, error: null };
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    if (!process.env.OPENAI_API_KEY) return { ...classifyByKeywords(""), transcript: "", error };
+  }
+  try {
+    const full = (await transcribe(audio)) ?? "";
+    return { ...(await classify(full)), transcript: full, error: null };
+  } catch (e) {
+    return { ...classifyByKeywords(""), transcript: "", error: e instanceof Error ? e.message : String(e) };
+  }
+}

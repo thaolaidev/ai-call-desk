@@ -1,8 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { applyCallResult } from "./outcome";
 import { deliverResult } from "./sync";
-import { classify } from "./stt";
-import { transcribe } from "./stt";
+import { analyzeAnswer } from "./stt";
 import { downloadRecording, findCdrByRef, mapCallResult, type Cdr } from "./yalecom";
 
 const IN_FLIGHT = ["dialing", "ringing", "in_progress"];
@@ -56,13 +55,9 @@ export async function processYalecomCall(db: SupabaseClient, callId: string, cdr
     if (!error) recordingPath = path;
   }
 
-  let full = "";
-  let sttError: string | null = null;
-  if (audio) {
-    try { full = (await transcribe(audio)) ?? ""; } catch (e) { sttError = e instanceof Error ? e.message : String(e); }
-  }
-  const c = await classify(full);
-
+  const c = await analyzeAnswer(audio);
+  const full = c.transcript;
+  const sttError = c.error;
   await applyCallResult(db, {
     callId,
     outcome: c.outcome,

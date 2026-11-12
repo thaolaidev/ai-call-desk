@@ -21,6 +21,7 @@ export default async function SettingsPage() {
     ingest: !!process.env.INGEST_API_KEY,
     yalecom: !!process.env.YALECOM_COMPANY_ID && !!process.env.YALECOM_KEY,
     openai: !!process.env.OPENAI_API_KEY,
+    gemini: !!process.env.GEMINI_API_KEY,
   };
   const callbackUrl = `${site}/api/yalecom/callback${process.env.YALECOM_CALLBACK_TOKEN ? "?token=<YALECOM_CALLBACK_TOKEN>" : ""}`;
 
@@ -77,7 +78,7 @@ export default async function SettingsPage() {
           <div className="card-b">
             <dl className="kv">
               <dt>Yalecom (YALECOM_COMPANY_ID / KEY)</dt><dd>{env.yalecom ? "ตั้งแล้ว" : "ยังไม่ตั้ง"}</dd>
-              <dt>ถอดเสียง (OPENAI_API_KEY)</dt><dd>{env.openai ? "ตั้งแล้ว" : "ยังไม่ตั้ง (จะจับคำว่า ว่าง/ไม่ว่าง ไม่ได้ เพราะไม่มีข้อความ)"}</dd>
+              <dt>ถอดเสียง + จัดผล</dt><dd>{env.gemini ? "Gemini (ตั้งแล้ว)" : env.openai ? "OpenAI (ตั้งแล้ว)" : "ยังไม่ตั้ง GEMINI_API_KEY หรือ OPENAI_API_KEY"}</dd>
               <dt>VAPI_API_KEY</dt><dd>{env.vapiKey ? "ตั้งแล้ว" : "ยังไม่ตั้ง (ใช้ได้แค่โหมดจำลอง)"}</dd>
               <dt>VAPI_WEBHOOK_SECRET</dt><dd>{env.vapiSecret ? "ตั้งแล้ว" : "ยังไม่ตั้ง"}</dd>
               <dt>LINE แจ้งแอดมิน</dt><dd>{env.line ? "ตั้งแล้ว" : "ยังไม่ตั้ง (ไม่บังคับ)"}</dd>
