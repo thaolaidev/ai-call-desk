@@ -3,6 +3,8 @@ import { normalizePhone } from "./phone";
 import { simulateProvider } from "./providers/simulate";
 import { vapiProvider } from "./providers/vapi";
 import { yalecomProvider } from "./providers/yalecom";
+import { findCdrByRef } from "./yalecom";
+import { processYalecomCall } from "./ivr";
 
 /**
  * โทรทดสอบ 1 สายหาเบอร์ที่ระบุ ไม่ผ่านคิว ไม่สนว่าแคมเปญเปิดหรือปิด
@@ -32,10 +34,24 @@ export async function startTestCall(phoneRaw: string, condo: string, segment: "n
     lead = data;
   }
   if (lead.status === "calling") {
-    const { data: open } = await db.from("calls").select("id, started_at").eq("lead_id", lead.id).in("state", ["dialing", "ringing", "in_progress"]);
-    const stuck = (open ?? []).filter((c: any) => Date.parse(c.started_at) < Date.now() - 2 * 60_000);
-    if ((open ?? []).length && stuck.length < (open ?? []).length) throw new Error("เบอร์นี้กำลังโทรอยู่ รอสักครู่แล้วลองใหม่");
-    for (const c of stuck) await db.from("calls").update({ state: "failed", ended_at: new Date().toISOString(), summary: "ยกเลิกสายทดสอบที่ค้าง" }).eq("id", c.id);
+    const { data: open } = await db.from("calls").select("id, started_at, provider").eq("lead_id", lead.id).in("state", ["dialing", "ringing", "in_progress"]);
+    const stillOpen: any[] = [];
+    for (const c of open ?? []) {
+      // สาย Yalecom: ถาม CDR ก่อน ถ้าวางสายแล้วจริง ปล่อยให้ระบบประมวลผลต่อ (ถอดเสียง) โดยไม่บล็อกการโทรใหม่
+      if (c.provider === "yalecom") {
+        const cdr = await findCdrByRef(c.id).catch(() => null);
+        if (cdr?.end_stamp || cdr?.call_result) {
+          processYalecomCall(db, c.id, cdr).catch(() => null);
+          continue;
+        }
+      }
+      if (Date.parse(c.started_at) < Date.now() - 2 * 60_000) {
+        await db.from("calls").update({ state: "failed", ended_at: new Date().toISOString(), summary: "ยกเลิกสายทดสอบที่ค้าง" }).eq("id", c.id);
+        continue;
+      }
+      stillOpen.push(c);
+    }
+    if (stillOpen.length) throw new Error("เบอร์นี้กำลังโทรอยู่ (ระบบโทรยังไม่ยืนยันว่าวางสาย) รอประมาณ 1 นาทีแล้วลองใหม่");
     lead.status = "new";
   }
   await db.from("leads").update({ prev_status: lead.status, status: "calling" }).eq("id", lead.id);

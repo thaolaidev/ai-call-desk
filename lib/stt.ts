@@ -20,7 +20,15 @@ export async function transcribe(audio: ArrayBuffer, filename = "answer.mp3"): P
   return String(body.text ?? "").trim();
 }
 
-export type Classified = { outcome: Outcome; summary: string; current_lease_until: string | null; answer_text: string };
+export type Classified = { outcome: Outcome; summary: string; current_lease_until: string | null; answer_text: string; details?: CallDetails };
+/** รายละเอียดที่ได้จากสคริปต์ห้องทรัพย์ใหม่ (null = ไม่ได้ถาม/ไม่ได้ตอบ) */
+export type CallDetails = {
+  ready_now: boolean | null;          // พร้อมเข้าอยู่เลยไหม
+  available_from: string | null;      // ว่างวันที่/เดือนไหน (ตามที่เจ้าของพูด)
+  price_confirmed: boolean | null;    // ยืนยันราคาเดิม
+  owner_price: number | null;         // ราคาที่เจ้าของบอก ถ้าไม่ตรงกับเดิม
+  accepts_foreigners: boolean | null; // รับลูกค้าต่างชาติไหม
+};
 
 /** ตัดส่วนที่เป็นเสียงอัดของเราออก เหลือเฉพาะคำตอบของเจ้าของ (เสียงอัดจบด้วย "ได้เลยค่ะ") */
 export function ownerPart(text: string) {
@@ -94,11 +102,14 @@ export async function analyzeWithGemini(audio: ArrayBuffer): Promise<(Classified
   if (!key) return null;
   const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const prompt =
-    "นี่คือไฟล์เสียงโทรศัพท์ภาษาไทย ช่วงแรกเป็นเสียงอัดของบริษัท Thaolai.com ถามเจ้าของว่าห้องคอนโดยังว่างไหม เสียงอัดจบด้วยคำว่า \"ได้เลยค่ะ\" หลังจากนั้นคือคำตอบของเจ้าของห้อง\n" +
-    "1) ถอดเสียงทั้งไฟล์เป็นข้อความ\n2) แยกเฉพาะคำพูดของเจ้าของห้อง (ไม่รวมเสียงอัดของบริษัท) ถ้าเจ้าของพูดแทรกระหว่างเสียงอัดให้นับด้วย\n" +
-    "3) จัดผล: avail = ห้องยังว่าง · not_avail = ไม่ว่าง/มีคนเช่า/ขายแล้ว · callback = ขอให้โทรมาใหม่ · dnc = ขอไม่ให้ติดต่อ/ไม่ฝากเอเจนต์ · wrong_number = ไม่ใช่เจ้าของ · unclear = ไม่ตอบหรือฟังไม่ออก\n" +
-    "ห้ามนับคำว่า ว่าง/ไม่ว่าง ที่อยู่ในเสียงอัดของบริษัท ห้ามเดา\n" +
-    'ตอบเป็น JSON เท่านั้น: {"transcript": string, "owner_answer": string, "outcome": "avail|not_avail|callback|dnc|wrong_number|unclear", "current_lease_until": string|null, "summary_th": string}';
+    "นี่คือไฟล์เสียงโทรศัพท์ภาษาไทย ระหว่างเสียงอัด (บอท) ของบริษัทเท่าไหร่ดอทคอม กับเจ้าของห้องคอนโด\n" +
+    "บอทเล่นคำถามต่อกันทั้งชุด เว้นช่วงสั้นๆ ให้เจ้าของตอบ: ห้องยังว่างไหม → พร้อมเข้าอยู่เลยไหม → ว่างวันที่/เดือนไหน → (ราคาห้องใช่ไหม) → รับลูกค้าต่างชาติไหม → แจ้งว่าแอดมินจะส่งโปรไฟล์ลูกค้า\n" +
+    "บอทถามต่อจนจบแม้เจ้าของตอบว่าไม่ว่างแล้ว ให้ยึดคำตอบของเจ้าของเป็นหลัก เจ้าของอาจตอบช้า ตอบข้ามข้อ หรือพูดแทรกเสียงบอท ให้จับคู่คำตอบกับคำถามตามความหมาย\n" +
+    "1) ถอดเสียงทั้งไฟล์เป็นข้อความ\n2) แยกเฉพาะคำพูดของเจ้าของห้อง (ไม่รวมเสียงบอท)\n" +
+    "3) จัดผล outcome: avail = ห้องยังว่าง · not_avail = ไม่ว่าง/มีคนเช่า/ขายแล้ว · callback = ขอให้โทรมาใหม่ · dnc = ขอไม่ให้ติดต่อ/ไม่ฝากเอเจนต์ · wrong_number = ไม่ใช่เจ้าของ · unclear = ไม่ตอบหรือฟังไม่ออก\n" +
+    "4) รายละเอียด (ไม่ได้ตอบให้ null): ready_now = พร้อมเข้าอยู่เลยไหม · available_from = วันที่/เดือนที่ว่างตามที่เจ้าของพูด · price_confirmed = ยืนยันราคาที่บอทพูด · owner_price = ราคาที่เจ้าของบอกถ้าไม่ตรง (ตัวเลขบาท) · accepts_foreigners = รับต่างชาติไหม · current_lease_until = ผู้เช่าปัจจุบันอยู่ถึงเมื่อไหร่\n" +
+    "ห้ามนับคำในเสียงบอท ห้ามเดา\n" +
+    'ตอบเป็น JSON เท่านั้น: {"transcript": string, "owner_answer": string, "outcome": "avail|not_avail|callback|dnc|wrong_number|unclear", "ready_now": boolean|null, "available_from": string|null, "price_confirmed": boolean|null, "owner_price": number|null, "accepts_foreigners": boolean|null, "current_lease_until": string|null, "summary_th": string}';
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": key },
@@ -113,8 +124,21 @@ export async function analyzeWithGemini(audio: ArrayBuffer): Promise<(Classified
   const text = body?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "{}";
   const j = JSON.parse(text.replace(/^```json\s*|\s*```$/g, ""));
   const allowed: Outcome[] = ["avail", "not_avail", "callback", "dnc", "wrong_number", "unclear"];
+  const bool = (v: unknown) => (typeof v === "boolean" ? v : null);
+  const details: CallDetails = {
+    ready_now: bool(j.ready_now),
+    available_from: j.available_from ? String(j.available_from) : null,
+    price_confirmed: bool(j.price_confirmed),
+    owner_price: Number.isFinite(Number(j.owner_price)) && j.owner_price != null ? Number(j.owner_price) : null,
+    accepts_foreigners: bool(j.accepts_foreigners),
+  };
+  let outcome: Outcome = allowed.includes(j.outcome) ? (j.outcome as Outcome) : "unclear";
+  // ว่าง + รู้ว่ารับต่างชาติหรือไม่ → แยกผลให้ละเอียดขึ้น
+  if (outcome === "avail" && details.accepts_foreigners === true) outcome = "avail_ok" as Outcome;
+  if (outcome === "avail" && details.accepts_foreigners === false) outcome = "avail_no" as Outcome;
   return {
-    outcome: allowed.includes(j.outcome) ? (j.outcome as Outcome) : "unclear",
+    outcome,
+    details,
     summary: String(j.summary_th ?? ""),
     current_lease_until: j.current_lease_until ?? null,
     answer_text: String(j.owner_answer ?? ""),

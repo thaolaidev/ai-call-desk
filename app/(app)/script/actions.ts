@@ -50,3 +50,17 @@ export async function deleteStepAudio(formData: FormData) {
   if (!error) await createAdminClient().storage.from(BUCKET).remove([row.path]);
   revalidatePath("/script");
 }
+
+/** บันทึกลำดับที่เล่นในสาย: เล่นท่อนไหน + รอให้ตอบกี่วินาที */
+export async function savePlaylist(formData: FormData) {
+  const sb = await createClient();
+  const now = new Date().toISOString();
+  const rows = Object.keys(STEPS).map((k) => ({
+    step_key: k,
+    enabled: formData.get(`on_${k}`) === "on",
+    wait_after: Math.min(15, Math.max(0, Math.round(Number(formData.get(`wait_${k}`)) || 0))),
+    updated_at: now,
+  }));
+  await sb.from("script_playlist").upsert(rows);
+  revalidatePath("/script");
+}

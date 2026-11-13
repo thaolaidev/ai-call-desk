@@ -53,7 +53,7 @@ export async function ingestLeads(db: SupabaseClient, items: any[]): Promise<Ing
       phone,
       condo: String(condo).trim(),
       unit: x.unit ? String(x.unit).trim() : null,
-      rent: x.rent != null && x.rent !== "" ? Number(String(x.rent).replace(/[^\d.]/g, "")) || null : null,
+      rent: (x.rent ?? x.price) != null && (x.rent ?? x.price) !== "" ? Number(String(x.rent ?? x.price).replace(/[^\d.]/g, "")) || null : null,
       source: x.source ? String(x.source) : "VPS",
       segment: x.segment === "old" ? "old" : x.segment === "new" ? "new" : listed_at ? (Date.parse(listed_at) >= newBefore ? "new" : "old") : null,
       customer_nationalities: x.customer_nationalities ? String(x.customer_nationalities) : null,

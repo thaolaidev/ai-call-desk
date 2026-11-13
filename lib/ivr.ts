@@ -78,7 +78,8 @@ export async function processYalecomCall(db: SupabaseClient, callId: string, cdr
     endedReason: sttError ? `answered (STT error: ${sttError})` : "answered",
     analysis: {
       call_outcome: c.outcome,
-      room_available: c.outcome === "avail" ? true : c.outcome === "not_avail" ? false : null,
+      room_available: c.outcome.startsWith("avail") ? true : c.outcome === "not_avail" ? false : null,
+      ...(c.details ?? {}),
       current_lease_until: c.current_lease_until,
       summary_th: c.summary,
       answer_text: c.answer_text,
@@ -86,7 +87,7 @@ export async function processYalecomCall(db: SupabaseClient, callId: string, cdr
       xml_cdr_uuid: cdr.xml_cdr_uuid,
     },
     transcript: [
-      { role: "system", text: "เล่นเสียงอัด: ถามว่าห้องยังว่างไหม" },
+      { role: "system", text: "เล่นเสียงอัดตามบทโทร" },
       ...(c.answer_text ? [{ role: "owner" as const, text: c.answer_text }] : [{ role: "system" as const, text: audio ? "ไม่ได้ยินคำตอบ" : "ไม่มีไฟล์บันทึกเสียง" }]),
     ],
   });

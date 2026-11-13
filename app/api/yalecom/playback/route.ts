@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizePhone } from "@/lib/phone";
 import { condoFileName } from "@/lib/yalecom";
 import { findCondoAudio } from "@/lib/condolib";
+import { buildPlaybackList, loadPlaylist } from "@/lib/playlist";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,13 @@ export async function POST(req: NextRequest) {
       condoId = data?.[0]?.condo_id ?? null;
       segment = data?.[0]?.segment ?? segment;
     }
+  }
+
+  // ห้องทรัพย์ใหม่: เล่นบทโทรทั้งชุดตามลำดับในหน้า "บทโทร" (เว้นช่วงเงียบให้เจ้าของตอบ)
+  if (segment === "new") {
+    const audio: any = condo ? await findCondoAudio(db, { condo, condo_id: condoId }) : null;
+    const condoFile = audio?.ready ? audio.file_name ?? condoFileName(condo!) : null;
+    return NextResponse.json({ playback_list: buildPlaybackList(await loadPlaylist(db), condoFile) });
   }
 
   // ไฟล์เสียงของห้องนั้น
