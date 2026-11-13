@@ -7,6 +7,7 @@ import { Top } from "@/components/Top";
 import { Pill } from "@/components/Pill";
 import { CsvImport } from "@/components/CsvImport";
 import { SelectAll } from "@/components/SelectAll";
+import { PullButton } from "@/components/PullButton";
 import { addLead, queueLeads, pullNow } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,8 @@ type Tab = "today" | "called" | "all";
 const SEG_LABEL: Record<Seg, string> = { new: "ทรัพย์ใหม่", old: "ทรัพย์เก่า" };
 const TAB_LABEL: Record<Tab, string> = { today: "จะโทรวันนี้", called: "โทรแล้ว · อัปเดตสถานะแล้ว", all: "ทั้งหมด" };
 const RESULT_STATUSES = ["avail", "avail_ok", "avail_profile", "avail_no", "not_avail", "callback", "noanswer", "unclear", "invalid", "wrong_number", "dnc", "closed"];
+
+export const maxDuration = 60;
 
 type SP = Promise<{ seg?: string; tab?: string; status?: string; q?: string; page?: string; pull?: string; msg?: string }>;
 
@@ -74,7 +77,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
   return (
     <>
       <Top title="กองลีด" sub="แยกทรัพย์ใหม่ / ทรัพย์เก่า และแยกห้องที่จะโทรวันนี้ กับห้องที่โทรแล้ว">
-        <form action={pullNow}><button className="btn">ดึงลีดจากเว็บ</button></form>
+        <form action={pullNow}><PullButton /></form>
       </Top>
       <div className="view">
         {sp.pull && sp.msg && <p className={`banner ${sp.pull === "err" ? "err" : ""}`}>{sp.pull === "err" ? "ดึงลีดไม่สำเร็จ: " : "ดึงลีดแล้ว · "}{sp.msg}</p>}

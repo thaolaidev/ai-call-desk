@@ -16,14 +16,15 @@ export async function pullLeads(db: SupabaseClient): Promise<IngestResult & { er
     const res = await fetch(`${vpsBase()}/leads`, {
       headers: { "X-API-Key": process.env.VPS_API_KEY!, Accept: "application/json" },
       cache: "no-store",
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(15_000),
     });
     const text = await res.text();
     if (!res.ok) return { ...empty, error: `HTTP ${res.status}: ${text.slice(0, 200)}` };
     const json = JSON.parse(text);
     items = json?.data?.items ?? json?.items ?? (Array.isArray(json?.data) ? json.data : Array.isArray(json) ? json : []);
   } catch (e) {
-    return { ...empty, error: e instanceof Error ? e.message : String(e) };
+    const m = e instanceof Error ? e.message : String(e);
+    return { ...empty, error: /abort|timeout/i.test(m) ? "เว็บเท่าไหร่ไม่ตอบภายใน 15 วินาที (อาจถูกไฟร์วอลล์บล็อก IP ของ Vercel)" : `เรียก API ไม่ได้: ${m}` };
   }
   return ingestLeads(db, items);
 }

@@ -62,11 +62,20 @@ export async function importLeads(rows: CsvRow[], segment: "new" | "old" = "new"
 
 /** ปุ่ม "ดึงลีดจากเว็บ" — ต้องเป็นคนในทีมเท่านั้น */
 export async function pullNow() {
-  const supabase = await createClient();
-  const { data: me } = await supabase.from("settings").select("id").eq("id", 1).single();
-  if (!me) redirect("/leads?pull=err&msg=" + encodeURIComponent("ไม่มีสิทธิ์"));
-  const r = await pullLeads(createAdminClient());
+  let msg: string;
+  let ok = false;
+  try {
+    const supabase = await createClient();
+    const { data: me } = await supabase.from("settings").select("id").eq("id", 1).single();
+    if (!me) throw new Error("ไม่มีสิทธิ์ (อีเมลไม่อยู่ในทีม)");
+    const r = await pullLeads(createAdminClient());
+    if (r.error) throw new Error(r.error);
+    const reasons = [...new Set(r.skipped.map((x) => x.reason))].slice(0, 2).join(" / ");
+    msg = `ได้ ${r.received} รายการ · ใหม่ ${r.created} · อัปเดต ${r.updated} · เข้าคิว ${r.queued}${r.skipped.length ? ` · ข้าม ${r.skipped.length} (${reasons})` : ""}`;
+    ok = true;
+  } catch (e) {
+    msg = e instanceof Error ? e.message : String(e);
+  }
   revalidatePath("/leads");
-  if (r.error) redirect("/leads?pull=err&msg=" + encodeURIComponent(r.error.slice(0, 150)));
-  redirect(`/leads?pull=ok&msg=${encodeURIComponent(`ได้ ${r.received} รายการ · ใหม่ ${r.created} · อัปเดต ${r.updated} · เข้าคิว ${r.queued}${r.skipped.length ? ` · ข้าม ${r.skipped.length}` : ""}`)}`);
+  redirect(`/leads?pull=${ok ? "ok" : "err"}&msg=${encodeURIComponent(msg.slice(0, 300))}`);
 }
