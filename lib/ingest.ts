@@ -29,7 +29,7 @@ export async function ingestLeads(db: SupabaseClient, items: any[]): Promise<Ing
     external_id: string | null; owner_name: string; phone: string; condo: string; unit: string | null; rent: number | null;
     source: string; segment: "new" | "old" | null; customer_nationalities: string | null; viewing_when: string | null;
     vps_status: string | null; vps_updated_at: string | null; queue: boolean | null;
-    code: string | null; listed_at: string | null; vps_updated_by: string | null;
+    code: string | null; listed_at: string | null; vps_updated_by: string | null; condo_id: string | null;
   };
   const newBefore = now - (s?.new_days ?? 7) * DAY;
   const rows: Row[] = [];
@@ -64,6 +64,7 @@ export async function ingestLeads(db: SupabaseClient, items: any[]): Promise<Ing
       code: x.code ? String(x.code).trim() : null,
       listed_at,
       vps_updated_by: x.updated_by ? String(x.updated_by).trim() : null,
+      condo_id: x.condo_id != null && String(x.condo_id).trim() ? String(x.condo_id).trim() : x.project_id != null && String(x.project_id).trim() ? String(x.project_id).trim() : null,
     });
   }
 
@@ -87,6 +88,7 @@ export async function ingestLeads(db: SupabaseClient, items: any[]): Promise<Ing
       owner_name: r.owner_name, phone: r.phone, condo: r.condo, unit: r.unit, rent: r.rent, source: r.source, segment,
       customer_nationalities: r.customer_nationalities, viewing_when: r.viewing_when, vps_status: r.vps_status, vps_updated_at: r.vps_updated_at,
       code: r.code, listed_at: r.listed_at, vps_updated_by: r.vps_updated_by,
+      ...(r.condo_id ? { condo_id: r.condo_id } : {}),
     };
 
     if (existing) {

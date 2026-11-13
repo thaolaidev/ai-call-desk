@@ -7,6 +7,7 @@ import { pollYalecom } from "./ivr";
 import { bkkClock, todayRangeBKK, toMinutes } from "./time";
 import { syncPending } from "./sync";
 import { pullLeadsIfDue } from "./vps";
+import { fillMissingCondoAudio } from "./botnoi";
 
 const IN_FLIGHT = ["dialing", "ringing", "in_progress"];
 const STALE_MIN = 15; // สายที่ค้างนานเกินนี้ถือว่าล้มเหลว (เช่น webhook ไม่มา)
@@ -58,6 +59,8 @@ export async function tick(): Promise<TickReport> {
   } catch (e) {
     report.errors.push(`ดึงลีดจาก VPS: ${e instanceof Error ? e.message : e}`);
   }
+  // ทยอยสร้างเสียงชื่อคอนโดที่ยังไม่มี (ครั้งละ 2 โครงการ)
+  await fillMissingCondoAudio(db, 2).catch(() => null);
 
   // 2) เติมสายทีละห้อง (ทรัพย์ใหม่ / ทรัพย์เดิม)
   const { data: rooms } = await db.from("call_rooms").select("*").order("segment");

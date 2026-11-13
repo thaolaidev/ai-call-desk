@@ -57,3 +57,16 @@ export async function testCall(_: string | null, formData: FormData): Promise<st
     return `โทรไม่สำเร็จ: ${e instanceof Error ? e.message : String(e)}`;
   }
 }
+
+/** ให้ Botnoi อ่านชื่อคอนโดใหม่ (ใช้คำอ่านในช่อง) แล้วเก็บไฟล์ไว้ใช้ซ้ำ */
+export async function genCondoAudio(formData: FormData) {
+  const condo = String(formData.get("condo") || "");
+  if (!condo) return;
+  const supabase = await createClient();
+  const { data: team } = await supabase.from("settings").select("id").eq("id", 1).maybeSingle();
+  if (!team) return;
+  const { createAdminClient } = await import("@/lib/supabase/admin");
+  const { ensureCondoAudio } = await import("@/lib/botnoi");
+  await ensureCondoAudio(createAdminClient(), condo, { text: String(formData.get("tts_text") || "").trim() || null, force: true }).catch(() => null);
+  revalidatePath("/settings");
+}

@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { STEPS, STEP_KEYS, yalecomName } from "@/lib/script";
 import { Top } from "@/components/Top";
 import { AudioUpload } from "@/components/AudioUpload";
-import { deleteStepAudio } from "./actions";
+import { deleteStepAudio, uploadStepAudio } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,10 @@ type Row = { step_key: string; path: string; file_name: string | null; size_byte
 
 export default async function ScriptPage() {
   const sb = await createClient();
-  const { data, error } = await sb.from("script_audio").select("*");
+  const [{ data, error }, { count: condoReady }] = await Promise.all([
+    sb.from("script_audio").select("*"),
+    sb.from("condo_audio").select("condo", { count: "exact", head: true }).not("path", "is", null),
+  ]);
   const rows = new Map<string, Row>(((data ?? []) as Row[]).map((r) => [r.step_key, r]));
   const done = STEP_KEYS.filter((k) => rows.has(k)).length;
 
@@ -32,7 +35,7 @@ export default async function ScriptPage() {
         <p className="step-txt">“{s.text}”</p>
         {r && <audio controls preload="none" src={urlOf(r)} />}
         <div className="step-f">
-          <AudioUpload step={k} has={!!r} />
+          <AudioUpload action={uploadStepAudio} fields={{ step: k }} has={!!r} />
           {r && (
             <>
               <a className="small" href={dlOf(k, r)}>ดาวน์โหลด ({yalecomName(k)})</a>
@@ -58,8 +61,8 @@ export default async function ScriptPage() {
           <Card k="02-1" />
           <Down />
           <div className="step condo">
-            <div className="step-h"><span className="step-no">ชื่อ</span><b>ชื่อคอนโด (แยกไฟล์ต่อคอนโด)</b></div>
-            <p className="step-txt">เช่น “ไอดีโอ โมบิ อโศก” · จัดการได้ที่ <Link href="/settings">ตั้งค่าระบบ → ไฟล์เสียงชื่อคอนโด</Link></p>
+            <div className="step-h"><span className="step-no">ชื่อ</span><b>ชื่อคอนโด (จากคลัง)</b></div>
+            <p className="step-txt">Botnoi อ่านให้อัตโนมัติ เก็บไว้ใช้ซ้ำ · มีเสียงแล้ว {condoReady ?? 0} โครงการ · ดู/แก้ที่ <Link href="/condos">คลังชื่อคอนโด</Link></p>
           </div>
           <Down />
           <Card k="02-2" />
@@ -67,39 +70,41 @@ export default async function ScriptPage() {
           <div className="branches">
             <section className="branch bad" aria-label="ทางห้องไม่ว่าง">
               <Fork label="ห้องไม่ว่าง" />
-              <Card k="02B" />
-              <div className="end">จบสาย · ผล: ไม่ว่าง</div>
+              <div className="end">วางสาย · ผล: ไม่ว่าง</div>
             </section>
 
             <section className="branch good" aria-label="ทางห้องว่าง">
-              <Fork label="ห้องว่าง" />
+              <Fork label="ห้องว่าง · สอบถามรายละเอียด" />
               <Card k="03" />
+              <div className="or">ถ้าตอบว่าพร้อมเข้าอยู่เลย ข้าม 03-1 และ 03-2</div>
+              <Card k="03-1" /><Down /><Card k="03-2" />
+              <Down />
+              <Card k="04-1" />
+              <Down />
+              <div className="step condo">
+                <div className="step-h"><span className="step-no">ราคา</span><b>ราคาห้อง (ต่อห้อง)</b></div>
+                <p className="step-txt">เช่น “หนึ่งหมื่นห้าพัน” · ต้องให้ dev ส่งราคาห้องมาใน API ก่อน แล้วระบบจะให้ Botnoi อ่านตัวเลขและเก็บไว้ใช้ซ้ำ</p>
+              </div>
+              <Down />
+              <Card k="04-2" />
+              <Down />
+              <Card k="05" />
               <div className="branches inner">
                 <section className="branch">
                   <Fork label="รับต่างชาติ" />
-                  <Card k="04A" />
-                  <div className="or">หรือ (สลับชุด)</div>
-                  <Card k="04B" />
+                  <div className="or">ตอบเฉพาะเมื่อเจ้าของถามว่า “ผู้เช่าชาติไหน”</div>
+                  <Card k="06A" />
                 </section>
                 <section className="branch">
-                  <Fork label="ไม่รับต่างชาติ" />
-                  <Card k="05-1" /><Down /><Card k="05-2" /><Down /><Card k="05-3" /><Down /><Card k="05-4" />
+                  <Fork label="ไม่รับต่างชาติ · อธิบายกฎ 2 ข้อ" />
+                  <Card k="07-1" /><Down /><Card k="07-2" /><Down /><Card k="07-3" /><Down /><Card k="07-4" />
                 </section>
               </div>
               <Down />
-              <Card k="06" />
-              <div className="branches inner">
-                <section className="branch">
-                  <Fork label="ตกลง" />
-                  <Card k="07" />
-                  <div className="end">จบสาย · ผล: ว่าง · ส่งโปรไฟล์</div>
-                </section>
-                <section className="branch">
-                  <Fork label="ปฏิเสธ" />
-                  <Card k="07B" />
-                  <div className="end">จบสาย · ผล: ว่าง · ไม่รับโปรไฟล์</div>
-                </section>
-              </div>
+              <Card k="08" />
+              <Down />
+              <Card k="09" />
+              <div className="end">จบสาย · ผล: ว่าง</div>
             </section>
           </div>
         </div>

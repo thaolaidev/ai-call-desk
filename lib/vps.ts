@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ingestLeads, type IngestResult } from "./ingest";
+import { fillMissingCondoAudio } from "./botnoi";
 
 /** API ฝั่งเว็บเท่าไหร่ เช่น https://thaolai.com/service/api/v1/ai-call */
 export const vpsBase = () => (process.env.VPS_API_URL ?? "").replace(/\/+$/, "");
@@ -73,7 +74,10 @@ export async function pullLeads(db: SupabaseClient): Promise<IngestResult & { er
     const m = e instanceof Error ? e.message : String(e);
     return { ...empty, error: /abort|timeout/i.test(m) ? "เว็บเท่าไหร่ไม่ตอบภายใน 15 วินาที (อาจถูกไฟร์วอลล์บล็อก IP ของ Vercel)" : `เรียก API ไม่ได้: ${m}` };
   }
-  return ingestLeads(db, items);
+  const result = await ingestLeads(db, items);
+  // คอนโดใหม่ที่ยังไม่มีเสียงชื่อ → ให้ Botnoi อ่านแล้วเก็บไว้ใช้ซ้ำ
+  await fillMissingCondoAudio(db, 5).catch(() => null);
+  return result;
 }
 
 /** เวลาดึงประจำวันของวันนี้ (เวลาไทย) เช่น "09:00" → Date */

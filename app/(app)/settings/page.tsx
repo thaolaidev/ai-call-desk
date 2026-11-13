@@ -1,9 +1,10 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Top } from "@/components/Top";
 import { CopyButton } from "@/components/CopyButton";
 import { TestCallForm } from "@/components/TestCallForm";
 import { FIRST_MESSAGE, SYSTEM_PROMPT, ANALYSIS_SCHEMA, SUMMARY_PROMPT } from "@/lib/prompt";
-import { updateSettings, saveCondoAudio } from "./actions";
+import { updateSettings } from "./actions";
 import { updateCampaign } from "../calling/actions";
 
 const DAYS = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
@@ -32,6 +33,7 @@ export default async function SettingsPage() {
     openai: !!process.env.OPENAI_API_KEY,
     gemini: !!process.env.GEMINI_API_KEY,
     vps: !!process.env.VPS_API_URL && !!process.env.VPS_API_KEY,
+    botnoi: !!process.env.BOTNOI_TOKEN,
   };
   const callbackUrl = `${site}/api/yalecom/callback${process.env.YALECOM_CALLBACK_TOKEN ? "?token=<YALECOM_CALLBACK_TOKEN>" : ""}`;
 
@@ -44,7 +46,7 @@ export default async function SettingsPage() {
   const counts = new Map<string, number>();
   for (const r of condoRows ?? []) counts.set(r.condo, (counts.get(r.condo) ?? 0) + 1);
   const condos = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 200);
-  const missing = condos.filter(([c]) => !audioMap.get(c)?.ready).length;
+  const missing = condos.filter(([c]) => !audioMap.get(c)?.path).length;
   const schemaText = JSON.stringify(ANALYSIS_SCHEMA, null, 2);
   const block = (title: string, text: string) => (
     <div className="card">
@@ -132,6 +134,7 @@ export default async function SettingsPage() {
           <div className="card-b">
             <dl className="kv">
               <dt>เว็บเท่าไหร่ (VPS_API_URL / VPS_API_KEY)</dt><dd>{env.vps ? `ตั้งแล้ว · ดึงลีดทุกวัน ${s.pull_time ?? "09:00"} · ส่งผลกลับทุก ${s.sync_every_min ?? 30} นาที${s.last_pull_at ? ` · ล่าสุด ${new Date(s.last_pull_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })}` : ""}` : "ยังไม่ตั้ง"}</dd>
+              <dt>Botnoi อ่านชื่อคอนโด (BOTNOI_TOKEN)</dt><dd>{env.botnoi ? `ตั้งแล้ว · ${(process.env.BOTNOI_VERSION ?? "v2").toUpperCase()} · ผู้พูด ${process.env.BOTNOI_SPEAKER || "Ava (ค่าเริ่มต้น)"}` : "ยังไม่ตั้ง"}</dd>
               <dt>Yalecom (YALECOM_COMPANY_ID / KEY)</dt><dd>{env.yalecom ? "ตั้งแล้ว" : "ยังไม่ตั้ง"}</dd>
               <dt>ถอดเสียง + จัดผล</dt><dd>{env.gemini ? "Gemini (ตั้งแล้ว)" : env.openai ? "OpenAI (ตั้งแล้ว)" : "ยังไม่ตั้ง GEMINI_API_KEY หรือ OPENAI_API_KEY"}</dd>
               <dt>VAPI_API_KEY</dt><dd>{env.vapiKey ? "ตั้งแล้ว" : "ยังไม่ตั้ง (ใช้ได้แค่โหมดจำลอง)"}</dd>
@@ -157,39 +160,8 @@ export default async function SettingsPage() {
         </div>
 
         <div className="card">
-          <div className="card-h">
-            <h2>ไฟล์เสียงชื่อคอนโด (Yalecom)</h2>
-            <span className="hint">ยังไม่มีไฟล์ {missing} จาก {condos.length} โครงการที่อยู่ในคิว · ยังไม่มีไฟล์ = เล่นแบบไม่มีชื่อคอนโด</span>
-          </div>
-          <div className="tbl-wrap">
-            <table className="tbl" style={{ minWidth: 820 }}>
-              <thead><tr><th>คอนโด</th><th>ห้องในคิว</th><th>คำอ่าน (ส่งให้ Botnoi)</th><th>ชื่อไฟล์ใน Yalecom</th><th>อัปโหลดแล้ว</th><th></th></tr></thead>
-              <tbody>
-                {condos.map(([condo, n]) => {
-                  const a: any = audioMap.get(condo);
-                  const file = a?.file_name ?? condoFileName(condo);
-                  return (
-                    <tr key={condo}>
-                      <td><b style={{ fontWeight: 500 }}>{condo}</b></td>
-                      <td className="mono">{n}</td>
-                      <td colSpan={4}>
-                        <form action={saveCondoAudio} style={{ display: "grid", gridTemplateColumns: "minmax(180px,1fr) 170px 90px auto", gap: 10, alignItems: "center" }}>
-                          <input type="hidden" name="condo" value={condo} />
-                          <input type="hidden" name="file_name" value={file} />
-                          <input name="tts_text" defaultValue={a?.tts_text ?? ""} placeholder="เช่น ไอดีโอ โมบิ อโศก" aria-label={`คำอ่าน ${condo}`} style={{ padding: "6px 8px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--surface)" }} />
-                          <span className="mono small">{file} <CopyButton text={file} /></span>
-                          <label className="toggle"><input type="checkbox" name="ready" defaultChecked={!!a?.ready} />พร้อม</label>
-                          <button className="btn sm">บันทึก</button>
-                        </form>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!condos.length && <tr><td colSpan={6} className="empty">ยังไม่มีห้องในคิว</td></tr>}
-              </tbody>
-            </table>
-          </div>
-          <p className="card-b hint">ขั้นตอน: ใส่คำอ่าน → สร้างเสียงใน Botnoi → ตั้งชื่อไฟล์ตามคอลัมน์ "ชื่อไฟล์" → ส่ง/อัปโหลดเข้า Yalecom → ติ๊ก "พร้อม"</p>
+          <div className="card-h"><h2>เสียงชื่อคอนโด</h2><Link className="btn sm" href="/condos">ไปคลังชื่อคอนโด</Link></div>
+          <p className="card-b hint">ยังไม่มีเสียง {missing} จาก {condos.length} โครงการที่อยู่ในคิว · จัดการ ฟัง และอัปโหลดไฟล์ได้ที่หน้า "คลังชื่อคอนโด"</p>
         </div>
 
         <h2>บทของเอเจนต์ (วางใน Vapi Assistant)</h2>
