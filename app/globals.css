@@ -189,3 +189,31 @@ pre.code{margin:0;padding:16px;background:#0f1626;color:#dfe6f3;border-radius:10
 .subtabs a.on{background:var(--accent);color:var(--accent-ink)}
 .subtabs a b{font:500 12px var(--f-mono);opacity:.75}
 .seg{font-size:11.5px;padding:1px 7px;border-radius:5px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+
+/* หน้า บทโทร */
+.flow{display:flex;flex-direction:column;gap:6px;max-width:1100px}
+.step{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.step.has{border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.step.condo{border-style:dashed;background:transparent}
+.step-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.step-h .pill{margin-left:auto}
+.step-no{font:600 12px/1 var(--f-mono);background:var(--brand);color:var(--brand-ink);border-radius:6px;padding:4px 6px}
+.step-txt{margin:0;color:var(--muted);font-size:14px;line-height:1.6}
+.step audio{width:100%;height:36px}
+.step-f{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.upl{display:flex;align-items:center;gap:10px}
+.upl-btn{cursor:pointer}
+.upl-btn input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.upl-btn:focus-within .btn{outline:2px solid var(--brand);outline-offset:2px}
+.ok-txt{color:var(--ok)} .err-txt{color:var(--bad)}
+.linkbtn{background:none;border:0;padding:0;color:var(--bad);cursor:pointer;text-decoration:underline}
+.down{text-align:center;color:var(--muted);line-height:1}
+.branches{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:8px;align-items:start}
+.branches.inner{margin-top:4px}
+.branch{display:flex;flex-direction:column;gap:6px;border-top:3px solid var(--line);padding-top:8px}
+.branch.bad{border-top-color:var(--bad)} .branch.good{border-top-color:var(--ok)}
+.fork{font-weight:600;font-size:13px}
+.branch.bad>.fork{color:var(--bad)} .branch.good>.fork{color:var(--ok)}
+.or{text-align:center;font-size:12px;color:var(--muted)}
+.end{font-size:12.5px;color:var(--muted);text-align:center;padding:6px;border:1px dashed var(--line);border-radius:8px}
+@media (max-width:900px){.branches{grid-template-columns:1fr}}
