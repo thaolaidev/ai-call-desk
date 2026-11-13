@@ -31,6 +31,7 @@ export default async function SettingsPage() {
     yalecom: !!process.env.YALECOM_COMPANY_ID && !!process.env.YALECOM_KEY,
     openai: !!process.env.OPENAI_API_KEY,
     gemini: !!process.env.GEMINI_API_KEY,
+    vps: !!process.env.VPS_API_URL && !!process.env.VPS_API_KEY,
   };
   const callbackUrl = `${site}/api/yalecom/callback${process.env.YALECOM_CALLBACK_TOKEN ? "?token=<YALECOM_CALLBACK_TOKEN>" : ""}`;
 
@@ -72,6 +73,9 @@ export default async function SettingsPage() {
             <div className="field"><label htmlFor="call_end">หยุดโทร</label><input id="call_end" name="call_end" type="time" defaultValue={String(s.call_end).slice(0, 5)} /></div>
             <div className="field"><label htmlFor="retry_gap_min">ไม่รับสาย: โทรซ้ำทุก (นาที)</label><input id="retry_gap_min" name="retry_gap_min" type="number" min={15} defaultValue={s.retry_gap_min} /></div>
             <div className="field"><label htmlFor="max_attempts">โทรสูงสุด (ครั้ง)</label><input id="max_attempts" name="max_attempts" type="number" min={1} max={10} defaultValue={s.max_attempts} /></div>
+            <div className="field"><label htmlFor="pull_time">ดึงลีดจากเว็บทุกวันเวลา</label><input id="pull_time" name="pull_time" type="time" defaultValue={s.pull_time ?? "09:00"} /></div>
+            <div className="field"><label htmlFor="sync_every_min">ส่งผลกลับเว็บทุก (นาที)</label><input id="sync_every_min" name="sync_every_min" type="number" min={5} max={1440} defaultValue={s.sync_every_min ?? 30} /></div>
+            <div className="field"><label htmlFor="new_days">ทรัพย์ใหม่: ลงประกาศมาไม่เกิน (วัน)</label><input id="new_days" name="new_days" type="number" min={1} max={90} defaultValue={s.new_days ?? 7} /></div>
             <div className="field"><label htmlFor="stale_days">ทรัพย์เก่า: โทรเช็คเมื่อไม่ได้อัปเดตเกิน (วัน)</label><input id="stale_days" name="stale_days" type="number" min={1} max={365} defaultValue={s.stale_days ?? 30} /></div>
             <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
               <legend className="small muted" style={{ fontWeight: 500, marginBottom: 6 }}>วันที่โทร</legend>
@@ -127,6 +131,7 @@ export default async function SettingsPage() {
           <div className="card-h"><h2>สถานะการเชื่อมต่อ</h2><span className="hint">ค่าเหล่านี้ตั้งใน Environment Variables</span></div>
           <div className="card-b">
             <dl className="kv">
+              <dt>เว็บเท่าไหร่ (VPS_API_URL / VPS_API_KEY)</dt><dd>{env.vps ? `ตั้งแล้ว · ดึงลีดทุกวัน ${s.pull_time ?? "09:00"} · ส่งผลกลับทุก ${s.sync_every_min ?? 30} นาที${s.last_pull_at ? ` · ล่าสุด ${new Date(s.last_pull_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })}` : ""}` : "ยังไม่ตั้ง"}</dd>
               <dt>Yalecom (YALECOM_COMPANY_ID / KEY)</dt><dd>{env.yalecom ? "ตั้งแล้ว" : "ยังไม่ตั้ง"}</dd>
               <dt>ถอดเสียง + จัดผล</dt><dd>{env.gemini ? "Gemini (ตั้งแล้ว)" : env.openai ? "OpenAI (ตั้งแล้ว)" : "ยังไม่ตั้ง GEMINI_API_KEY หรือ OPENAI_API_KEY"}</dd>
               <dt>VAPI_API_KEY</dt><dd>{env.vapiKey ? "ตั้งแล้ว" : "ยังไม่ตั้ง (ใช้ได้แค่โหมดจำลอง)"}</dd>

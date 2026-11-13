@@ -3,7 +3,6 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { applyCallResult, type Turn } from "@/lib/outcome";
 import { OUTCOMES, type Outcome } from "@/lib/status";
 import { tick } from "@/lib/dialer";
-import { deliverResult } from "@/lib/sync";
 
 export const dynamic = "force-dynamic";
 
@@ -66,7 +65,6 @@ export async function POST(req: NextRequest) {
       endedReason: msg.endedReason ?? null,
     });
 
-    await deliverResult(db, id); // ส่งผลกลับ VPS ทันที (ไม่สำเร็จจะส่งซ้ำตามรอบ)
     await tick(); // ว่างแล้ว 1 สาย เติมสายถัดไปทันที
     return NextResponse.json({ ok: true });
   }

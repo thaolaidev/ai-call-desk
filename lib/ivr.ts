@@ -1,6 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { applyCallResult } from "./outcome";
-import { deliverResult } from "./sync";
 import { analyzeAnswer } from "./stt";
 import { downloadRecording, findCdrByRef, mapCallResult, yalecomTime, type Cdr } from "./yalecom";
 
@@ -36,7 +35,6 @@ export async function processYalecomCall(db: SupabaseClient, callId: string, cdr
       endedReason: String(cdr.call_result ?? ""),
       transcript: [{ role: "system", text: `Yalecom: ${cdr.call_result ?? "ไม่ทราบผล"}` }],
     });
-    await deliverResult(db, callId);
     return "done";
   }
 
@@ -50,7 +48,6 @@ export async function processYalecomCall(db: SupabaseClient, callId: string, cdr
       endedReason: "answered_no_talk",
       transcript: [{ role: "system", text: "Yalecom: Answered แต่ duration = 0 วินาที ไม่มีไฟล์เสียง" }],
     });
-    await deliverResult(db, callId);
     return "done";
   }
 
@@ -94,7 +91,6 @@ export async function processYalecomCall(db: SupabaseClient, callId: string, cdr
     ],
   });
   if (recordingPath) await db.from("calls").update({ recording_path: recordingPath }).eq("id", callId);
-  await deliverResult(db, callId);
   return "done";
 }
 

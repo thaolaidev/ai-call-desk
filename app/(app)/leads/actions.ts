@@ -3,6 +3,9 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { normalizePhone } from "@/lib/phone";
 import { QUEUEABLE } from "@/lib/status";
+import { redirect } from "next/navigation";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { pullLeads } from "@/lib/vps";
 
 async function autoStatus(supabase: Awaited<ReturnType<typeof createClient>>) {
   const { data } = await supabase.from("settings").select("auto_queue").eq("id", 1).single();
@@ -55,4 +58,15 @@ export async function importLeads(rows: CsvRow[], segment: "new" | "old" = "new"
   const { data, error } = await supabase.from("leads").upsert(clean, { onConflict: "phone,condo", ignoreDuplicates: true }).select("id");
   revalidatePath("/leads");
   return { inserted: data?.length ?? 0, error: error?.message };
+}
+
+/** ปุ่ม "ดึงลีดจากเว็บ" — ต้องเป็นคนในทีมเท่านั้น */
+export async function pullNow() {
+  const supabase = await createClient();
+  const { data: me } = await supabase.from("settings").select("id").eq("id", 1).single();
+  if (!me) redirect("/leads?pull=err&msg=" + encodeURIComponent("ไม่มีสิทธิ์"));
+  const r = await pullLeads(createAdminClient());
+  revalidatePath("/leads");
+  if (r.error) redirect("/leads?pull=err&msg=" + encodeURIComponent(r.error.slice(0, 150)));
+  redirect(`/leads?pull=ok&msg=${encodeURIComponent(`ได้ ${r.received} รายการ · ใหม่ ${r.created} · อัปเดต ${r.updated} · เข้าคิว ${r.queued}${r.skipped.length ? ` · ข้าม ${r.skipped.length}` : ""}`)}`);
 }

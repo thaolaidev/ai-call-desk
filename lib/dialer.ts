@@ -5,7 +5,8 @@ import { vapiProvider } from "./providers/vapi";
 import { yalecomProvider } from "./providers/yalecom";
 import { pollYalecom } from "./ivr";
 import { bkkClock, todayRangeBKK, toMinutes } from "./time";
-import { deliverResult, syncPending } from "./sync";
+import { syncPending } from "./sync";
+import { pullLeadsIfDue } from "./vps";
 
 const IN_FLIGHT = ["dialing", "ringing", "in_progress"];
 const STALE_MIN = 15; // สายที่ค้างนานเกินนี้ถือว่าล้มเหลว (เช่น webhook ไม่มา)
@@ -35,7 +36,6 @@ export async function tick(): Promise<TickReport> {
     const lead = Array.isArray(c.leads) ? c.leads[0] : c.leads;
     const sim = simulateConversation(lead, s);
     await applyCallResult(db, { callId: c.id, ...sim });
-    await deliverResult(db, c.id);
     report.finished++;
   }
 
@@ -51,7 +51,13 @@ export async function tick(): Promise<TickReport> {
   report.finished += await pollYalecom(db).catch(() => 0);
 
   // 1d) ส่งผลการโทรที่ค้างกลับไปที่ VPS
-  await syncPending(db);
+  await syncPending(db, s);
+  try {
+    const pulled = await pullLeadsIfDue(db, s.last_pull_at, s.pull_time);
+    if (pulled?.error) report.errors.push(`ดึงลีดจาก VPS: ${pulled.error}`);
+  } catch (e) {
+    report.errors.push(`ดึงลีดจาก VPS: ${e instanceof Error ? e.message : e}`);
+  }
 
   // 2) เติมสายทีละห้อง (ทรัพย์ใหม่ / ทรัพย์เดิม)
   const { data: rooms } = await db.from("call_rooms").select("*").order("segment");

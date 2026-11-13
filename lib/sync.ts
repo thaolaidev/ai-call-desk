@@ -1,5 +1,13 @@
 import { createHmac } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { vpsBase } from "./vps";
+
+/** ปลายทางส่งผล: POST {VPS_API_URL}/results (X-API-Key) หรือ VPS_WEBHOOK_URL แบบเดิม (ลายเซ็น HMAC) */
+function target() {
+  if (vpsBase() && process.env.VPS_API_KEY) return { url: `${vpsBase()}/results`, key: process.env.VPS_API_KEY, secret: process.env.VPS_WEBHOOK_SECRET };
+  if (process.env.VPS_WEBHOOK_URL && process.env.VPS_WEBHOOK_SECRET) return { url: process.env.VPS_WEBHOOK_URL, key: undefined, secret: process.env.VPS_WEBHOOK_SECRET };
+  return null;
+}
 
 /** หน่วงก่อนส่งซ้ำ (นาที) หลังส่งไม่สำเร็จครั้งที่ 1, 2, 3, 4, 5 */
 const BACKOFF_MIN = [1, 5, 15, 60, 180];
@@ -34,7 +42,11 @@ export function buildResultPayload(call: any, lead: any, sentAt = new Date().toI
   return {
     event: "call.completed",
     delivery_id: call.id,
+    id: lead.external_id,
     external_id: lead.external_id,
+    code: lead.code ?? null,
+    updated_by: "AI Call",
+    updated_at: status ? sentAt : null,
     segment: lead.segment,
     contacted: status !== null,
     status,
@@ -64,9 +76,8 @@ export function sign(secret: string, timestamp: string, body: string) {
 
 /** ส่งผลของ 1 สายไปที่ VPS_WEBHOOK_URL พร้อมลายเซ็น แล้วจดผล/ตั้งเวลาส่งซ้ำ */
 export async function deliverResult(db: SupabaseClient, callId: string) {
-  const url = process.env.VPS_WEBHOOK_URL;
-  const secret = process.env.VPS_WEBHOOK_SECRET;
-  if (!url || !secret) return; // ยังไม่เชื่อม VPS: เก็บไว้เป็น pending ส่งทีหลังได้
+  const t = target();
+  if (!t) return; // ยังไม่เชื่อม VPS: เก็บไว้เป็น pending ส่งทีหลังได้
 
   const { data: call } = await db.from("calls").select("*, leads!calls_lead_id_fkey(*)").eq("id", callId).single();
   if (!call || call.state !== "ended" || call.sync_status !== "pending") return;
@@ -83,15 +94,17 @@ export async function deliverResult(db: SupabaseClient, callId: string) {
   const attempts = (call.sync_attempts ?? 0) + 1;
   let error: string | null = null;
   try {
-    const res = await fetch(url, {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "X-AICall-Event": "call.completed",
+      "X-AICall-Delivery": call.id,
+      "X-AICall-Timestamp": ts,
+    };
+    if (t.key) headers["X-API-Key"] = t.key;
+    if (t.secret) headers["X-AICall-Signature"] = sign(t.secret, ts, body);
+    const res = await fetch(t.url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-AICall-Event": "call.completed",
-        "X-AICall-Delivery": call.id,
-        "X-AICall-Timestamp": ts,
-        "X-AICall-Signature": sign(secret, ts, body),
-      },
+      headers,
       body,
       signal: AbortSignal.timeout(10_000),
     });
@@ -112,9 +125,14 @@ export async function deliverResult(db: SupabaseClient, callId: string) {
   }
 }
 
-/** เรียกทุก tick: ส่งผลที่ค้าง/ถึงรอบส่งซ้ำ ครั้งละไม่เกิน limit สาย */
-export async function syncPending(db: SupabaseClient, limit = 20) {
-  if (!process.env.VPS_WEBHOOK_URL || !process.env.VPS_WEBHOOK_SECRET) return 0;
+/**
+ * เรียกทุก tick: ส่งผลที่ค้างกลับ VPS เป็นรอบ ทุก sync_every_min นาที (ค่าเริ่มต้น 30)
+ * ส่งครั้งละไม่เกิน limit สาย ถ้ายังเหลือ tick ถัดไปจะส่งต่อทันที
+ */
+export async function syncPending(db: SupabaseClient, s?: { last_sync_at?: string | null; sync_every_min?: number | null }, limit = 50) {
+  if (!target()) return 0;
+  const every = s?.sync_every_min ?? 30;
+  if (s?.last_sync_at && Date.now() - Date.parse(s.last_sync_at) < every * 60_000) return 0;
   const now = new Date().toISOString();
   const { data } = await db
     .from("calls")
@@ -125,5 +143,7 @@ export async function syncPending(db: SupabaseClient, limit = 20) {
     .order("ended_at")
     .limit(limit);
   for (const c of data ?? []) await deliverResult(db, c.id);
+  // ส่งหมดแล้วค่อยนับรอบใหม่ (ถ้ายังเหลือ ปล่อยให้ tick ถัดไปส่งต่อ)
+  if ((data?.length ?? 0) < limit) await db.from("settings").update({ last_sync_at: now }).eq("id", 1);
   return data?.length ?? 0;
 }
