@@ -91,6 +91,9 @@ export default async function ScriptPage() {
         </form>
 
         <div className="flow">
+          <div className="or">เสียงรับคำ เล่นทันทีหลังเจ้าของตอบจบ ระหว่างรอ AI ตีความ ช่วยให้สายไม่เงียบ (ไม่ใส่ก็ได้)</div>
+          <Card k="ack" />
+          <div className="end">เริ่มบทโทร</div>
           <Card k="01" />
           <Down />
           <Card k="02-1" />

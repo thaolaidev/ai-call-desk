@@ -28,8 +28,8 @@ const CFG = {
   recDir: env("REC_DIR", "/var/spool/asterisk/recording"),
   maxCalls: Number(env("MAX_CALLS", 6)),
   ringTimeout: Number(env("RING_TIMEOUT", 30)),
-  listenMax: Number(env("LISTEN_MAX_SEC", 8)),
-  listenSilence: Number(env("LISTEN_SILENCE_SEC", 2)),
+  listenMax: Number(env("LISTEN_MAX_SEC", 7)),
+  listenSilence: Number(env("LISTEN_SILENCE_SEC", 1)),
 };
 const APP = "thaolai";
 const log = (...a) => console.log(new Date().toISOString(), ...a);
@@ -126,7 +126,7 @@ async function onEvent(e) {
 /** ดาวน์โหลดไฟล์เสียงแล้วแปลงเป็น wav 8kHz mono ที่ Asterisk เล่นได้ (เก็บ cache ตาม URL) */
 async function prepare(url) {
   if (!url) return null;
-  const name = createHash("sha1").update(url).digest("hex").slice(0, 20);
+  const name = createHash("sha1").update(`v2:${url}`).digest("hex").slice(0, 20);
   const out = `${CFG.sounds}/${name}.wav`;
   if (!existsSync(out)) {
     const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
@@ -136,7 +136,9 @@ async function prepare(url) {
     await writeFile(tmp, Buffer.from(await res.arrayBuffer()));
     try {
       // แปลงลงไฟล์ชั่วคราวก่อน แล้วค่อยเปลี่ยนชื่อ → ไม่มีไฟล์ครึ่งๆ กลางๆ ค้างใน cache
-      await run("ffmpeg", ["-loglevel", "error", "-y", "-i", tmp, "-ar", "8000", "-ac", "1", "-acodec", "pcm_s16le", part]);
+      // ตัดช่วงเงียบหัว-ท้ายไฟล์ (ไฟล์จาก Botnoi มักมีเงียบติดมา ทำให้สายเว้นจังหวะนาน)
+      const trim = "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.05,areverse,silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.15,areverse";
+      await run("ffmpeg", ["-loglevel", "error", "-y", "-i", tmp, "-af", trim, "-ar", "8000", "-ac", "1", "-acodec", "pcm_s16le", part]);
       if ((await stat(part)).size < 1000) throw new Error(`ไฟล์เสียงว่างหรือเสีย: ${url}`);
       await rename(part, out);
     } finally {
@@ -171,7 +173,8 @@ async function listen(s, kind, question) {
   const file = `${CFG.recDir}/${name}.wav`;
   const size = await stat(file).then((x) => x.size).catch(() => 0);
   if (size < 8000) return log(s.callId, kind, "silence"), { intent: "silent", text: "" }; // < ~0.5 วินาที
-  const a = await understand(kind, question, await readFile(file));
+  // เล่นเสียงรับคำสั้นๆ (เช่น "ค่ะ") ระหว่างรอ AI ตีความ → ไม่เงียบนาน
+  const [a] = await Promise.all([understand(kind, question, await readFile(file)), s.on("ack") ? play(s, s.snd.ack) : null]);
   s.answers.push({ step: kind, question, ...a });
   log(s.callId, kind, JSON.stringify(a));
   return a;
@@ -187,6 +190,7 @@ const KINDS = {
   foreign: 'เจ้าของรับลูกค้าต่างชาติไหม → intent: "yes" | "no" | "unclear" · asks_nationality = true ถ้าเจ้าของถามกลับว่าลูกค้าชาติไหน',
 };
 
+const noThinking = new Set(); // รุ่นที่ไม่รับการตั้งระดับคิด
 async function understand(kind, question, wav) {
   if (!CFG.geminiKey) return { intent: "unclear", text: "", error: "no GEMINI_API_KEY" };
   const prompt =
@@ -194,15 +198,24 @@ async function understand(kind, question, wav) {
     `${KINDS[kind]}\nห้ามเดา ถ้าฟังไม่ออกให้ unclear\n` +
     'ตอบ JSON เท่านั้น: {"text": string, "intent": string, "confidence": number (0-1), "available_from": string|null, "owner_price": number|null, "asks_nationality": boolean}';
   try {
-    const res = await fetch(`${CFG.geminiUrl}/${kind === "avail" ? CFG.geminiModelKey : CFG.geminiModel}:generateContent`, {
+    const model = kind === "avail" ? CFG.geminiModelKey : CFG.geminiModel;
+    // คิดน้อยที่สุดเพื่อให้ตอบเร็ว (3.8 Flash รับต่ำสุดแค่ "low", รุ่น Lite รับ "minimal")
+    const level = /lite/.test(model) ? "minimal" : "low";
+    const call = (withThinking) => fetch(`${CFG.geminiUrl}/${model}:generateContent`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": CFG.geminiKey },
       signal: AbortSignal.timeout(8000),
       body: JSON.stringify({
         contents: [{ parts: [{ inline_data: { mime_type: "audio/wav", data: wav.toString("base64") } }, { text: prompt }] }],
-        generationConfig: { temperature: 0, responseMimeType: "application/json" },
+        generationConfig: { responseMimeType: "application/json", ...(withThinking ? { thinkingConfig: { thinkingLevel: level } } : {}) },
       }),
     });
+    let res = await call(!noThinking.has(model));
+    if (res.status === 400 && !noThinking.has(model)) {
+      const t = await res.text().catch(() => "");
+      if (/think/i.test(t)) { noThinking.add(model); res = await call(false); }
+      else res = new Response(t, { status: 400 });
+    }
     if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 160)}`);
     const body = await res.json();
     const t = body?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "{}";

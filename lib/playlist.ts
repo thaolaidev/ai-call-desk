@@ -7,6 +7,7 @@ export const SILENCE_MP3_B64 = "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAA
 
 /** ค่าเริ่มต้นของแต่ละท่อน: เล่นไหม + รอให้ตอบกี่วินาทีหลังเล่น */
 export const DEFAULT_PLAY: Record<string, { enabled: boolean; wait: number }> = {
+  ack: { enabled: true, wait: 0 },
   "01": { enabled: true, wait: 0 },
   "02-1": { enabled: true, wait: 0 },
   "02-2": { enabled: true, wait: 4 },
@@ -43,7 +44,7 @@ export async function loadPlaylist(db: SupabaseClient) {
 export function buildPlaybackList(steps: { key: string; enabled: boolean; wait: number }[], condoFile: string | null) {
   const list: string[] = [];
   for (const s of steps) {
-    if (!s.enabled) continue;
+    if (!s.enabled || s.key === "ack") continue; // เสียงรับคำใช้เฉพาะระบบโทรแบบแยกทาง
     list.push(yalecomName(s.key));
     if (s.key === "02-1" && condoFile) list.push(condoFile);
     for (let i = 0; i < Math.min(15, Math.max(0, s.wait)); i++) list.push(WAIT_FILE);
