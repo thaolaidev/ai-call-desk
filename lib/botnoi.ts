@@ -13,10 +13,15 @@ const BUCKET = "script-audio";
 
 export const botnoiReady = () => !!process.env.BOTNOI_TOKEN;
 
-/** คำอ่านเริ่มต้น: ใช้ส่วนที่เป็นภาษาไทย เช่น "Metro sky / เมโทร สกาย วุฒากาศ" → "เมโทร สกาย วุฒากาศ" */
-export function defaultReading(condo: string) {
-  const parts = condo.split("/").map((p) => p.trim()).filter(Boolean);
-  return parts.find((p) => /[฀-๿]/.test(p)) ?? condo.trim();
+/**
+ * คำอ่านเริ่มต้น = ชื่อภาษาไทยอย่างเดียว
+ * "Metro sky วุฒกาศ / เมโทร สกาย วุฒากาศ" → "เมโทร สกาย วุฒากาศ" · "PLUM CONDO SUKHUMVIT97/1 / พลัมคอนโด สุขุมวิท 97/1" → "พลัมคอนโด สุขุมวิท 97/1"
+ * ไม่มีภาษาไทยเลย → null (ไม่สร้างเสียงอัตโนมัติ ต้องใส่คำอ่านเอง)
+ */
+export function defaultReading(condo: string): string | null {
+  const parts = condo.split(/\s+\/\s+/).map((p) => p.replace(/\*/g, "").replace(/\s+/g, " ").trim()).filter(Boolean);
+  const thai = parts.filter((p) => /[\u0E00-\u0E7F]/.test(p));
+  return thai.length ? thai[thai.length - 1] : null;
 }
 
 /** สร้างไฟล์เสียงจาก Botnoi → ได้ไฟล์ mp3 */
@@ -62,7 +67,11 @@ export async function ensureCondoAudio(db: SupabaseClient, condo: string, opts: 
   if (row?.path && !opts.force) return { reused: true, path: row.path as string };
   if (!botnoiReady()) throw new Error("ยังไม่ได้ตั้ง BOTNOI_TOKEN");
 
-  const text = ((opts.text ?? row?.tts_text ?? "").trim() || defaultReading(condo)).slice(0, 200);
+  const text = ((opts.text ?? row?.tts_text ?? "").trim() || defaultReading(condo) || "").slice(0, 200);
+  if (!text) {
+    await db.from("condo_audio").upsert({ condo, ...(opts.condo_id && !row?.condo_id ? { condo_id: opts.condo_id } : {}), file_name: row?.file_name ?? condoFileName(condo), tts_error: "ไม่มีชื่อภาษาไทย · ใส่คำอ่านเอง", updated_at: new Date().toISOString(), ready: row?.ready ?? false });
+    throw new Error("ไม่มีชื่อภาษาไทย");
+  }
   const file_name = row?.file_name ?? (opts.condo_id ? `tl_condo_${opts.condo_id.replace(/[^\w-]/g, "")}` : condoFileName(condo));
   const idPatch = opts.condo_id && !row?.condo_id ? { condo_id: opts.condo_id } : {};
   try {

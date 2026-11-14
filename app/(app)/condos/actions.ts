@@ -85,41 +85,55 @@ export async function uploadCondoFile(_: string | null, formData: FormData): Pro
 export type SheetRow = { condo_id: string; condo_name: string; tts_text: string };
 
 /**
- * นำเข้าชีท (condo_id, ชื่อคอนโด, คำอ่าน)
- * - เจอ condo_id หรือชื่อเดิม → อัปเดตคำอ่าน (ถ้าคำอ่านเปลี่ยนและเสียงมาจาก Botnoi → ล้างเสียงให้ระบบอ่านใหม่)
- * - ไม่เจอ → เพิ่มเข้าคลัง
+ * นำเข้าชีทคลังคอนโด ทีละก้อน (เบราว์เซอร์ส่งมาครั้งละ ~1,000 แถว)
+ * - มี condo_id นี้อยู่แล้ว → อัปเดตคำอ่าน (ถ้าชีทมีคำอ่าน และคำอ่านเปลี่ยน → ล้างเสียง Botnoi ให้อ่านใหม่)
+ * - ยังไม่มี → เพิ่มเข้าคลัง (ชื่อซ้ำกับที่มีอยู่ → ข้าม)
+ * ยังไม่สร้างเสียงตอนนำเข้า: ระบบจะอ่านเฉพาะคอนโดที่มีลีดจริงเท่านั้น
  */
-export async function importCondoSheet(rows: SheetRow[]): Promise<string> {
+export async function importCondoSheet(rows: SheetRow[]): Promise<{ added: number; updated: number; skipped: number; error?: string }> {
+  const res = { added: 0, updated: 0, skipped: 0 };
   const sb = await team();
-  if (!sb) return "ไม่มีสิทธิ์";
-  const { data: existing, error } = await sb.from("condo_audio").select("condo, condo_id, tts_text, audio_source, path");
-  if (error) return `อ่านคลังไม่ได้: ${error.message} (รัน update_0010_condo_id.sql แล้วหรือยัง)`;
-  const byId = new Map((existing ?? []).filter((r: any) => r.condo_id).map((r: any) => [String(r.condo_id), r]));
-  const byName = new Map((existing ?? []).map((r: any) => [r.condo, r]));
-  let added = 0, updated = 0, redo = 0, failed = 0;
+  if (!sb) return { ...res, error: "ไม่มีสิทธิ์" };
+  const clean = rows.slice(0, 2000)
+    .map((x) => ({ id: String(x.condo_id ?? "").trim() || null, name: String(x.condo_name ?? "").replace(/\s+/g, " ").trim(), text: String(x.tts_text ?? "").trim() || null }))
+    .filter((x) => x.name || x.id);
+  const ids = clean.map((x) => x.id).filter(Boolean) as string[];
+  const existing = new Map<string, any>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await sb.from("condo_audio").select("condo, condo_id, tts_text, audio_source, path").in("condo_id", ids.slice(i, i + 200));
+    if (error) return { ...res, error: `อ่านคลังไม่ได้: ${error.message} (รัน update_0010 แล้วหรือยัง)` };
+    for (const r of data ?? []) existing.set(String(r.condo_id), r);
+  }
   const now = new Date().toISOString();
-  for (const x of rows.slice(0, 5000)) {
-    const id = x.condo_id.trim() || null;
-    const name = x.condo_name.trim();
-    const text = x.tts_text.trim() || null;
-    if (!id && !name) continue;
-    const cur: any = (id && byId.get(id)) || (name && byName.get(name)) || null;
+  const seen = new Set<string>();
+  const inserts: Record<string, unknown>[] = [];
+  for (const x of clean) {
+    const cur = x.id ? existing.get(x.id) : null;
     if (cur) {
-      const changed = (text ?? "") !== (cur.tts_text ?? "");
-      const patch: Record<string, unknown> = { updated_at: now };
-      if (text) patch.tts_text = text;
-      if (id && !cur.condo_id) patch.condo_id = id;
-      if (changed && text && cur.audio_source !== "upload") { Object.assign(patch, { path: null, tts_error: null }); if (cur.path) redo++; }
-      const { error: e } = await sb.from("condo_audio").update(patch).eq("condo", cur.condo);
-      e ? failed++ : updated++;
+      if (x.text && x.text !== cur.tts_text) {
+        const patch: Record<string, unknown> = { tts_text: x.text, updated_at: now };
+        if (cur.audio_source !== "upload") Object.assign(patch, { path: null, tts_error: null });
+        const { error } = await sb.from("condo_audio").update(patch).eq("condo", cur.condo);
+        error ? res.skipped++ : res.updated++;
+      } else res.skipped++;
+      continue;
+    }
+    const name = x.name || `โครงการ #${x.id}`;
+    if (seen.has(name)) { res.skipped++; continue; }
+    seen.add(name);
+    inserts.push({ condo: name, condo_id: x.id, tts_text: x.text, file_name: x.id ? `tl_condo_${x.id.replace(/[^\w-]/g, "")}` : condoFileName(name), ready: false, updated_at: now });
+  }
+  for (let i = 0; i < inserts.length; i += 500) {
+    const part = inserts.slice(i, i + 500);
+    const { data, error } = await sb.from("condo_audio").upsert(part, { onConflict: "condo", ignoreDuplicates: true }).select("condo");
+    if (error) {
+      // ก้อนนี้มีแถวชนกัน → ใส่ทีละแถว
+      for (const r of part) { const { error: e } = await sb.from("condo_audio").insert(r); e ? res.skipped++ : res.added++; }
     } else {
-      const condo = name || `โครงการ #${id}`;
-      const { error: e } = await sb.from("condo_audio").insert({
-        condo, condo_id: id, tts_text: text, file_name: id ? `tl_condo_${id.replace(/[^\w-]/g, "")}` : condoFileName(condo), ready: false, updated_at: now,
-      });
-      e ? failed++ : added++;
+      res.added += data?.length ?? 0;
+      res.skipped += part.length - (data?.length ?? 0);
     }
   }
   revalidatePath("/condos");
-  return `เพิ่ม ${added} · อัปเดต ${updated}${redo ? ` (คำอ่านเปลี่ยน ${redo} โครงการ จะอ่านใหม่)` : ""}${failed ? ` · ไม่สำเร็จ ${failed}` : ""}`;
+  return res;
 }

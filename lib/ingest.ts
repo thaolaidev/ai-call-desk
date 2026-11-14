@@ -64,7 +64,7 @@ export async function ingestLeads(db: SupabaseClient, items: any[]): Promise<Ing
       code: x.code ? String(x.code).trim() : null,
       listed_at,
       vps_updated_by: x.updated_by ? String(x.updated_by).trim() : null,
-      condo_id: x.condo_id != null && String(x.condo_id).trim() ? String(x.condo_id).trim() : x.project_id != null && String(x.project_id).trim() ? String(x.project_id).trim() : null,
+      condo_id: (() => { const v = x.condo_id ?? x.location_id ?? x.project_id; return v != null && String(v).trim() ? String(v).trim() : null; })(),
     });
   }
 

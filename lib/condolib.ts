@@ -23,23 +23,41 @@ async function leadGroups(db: SupabaseClient) {
   return groups;
 }
 
+/** แบ่งเป็นก้อน (กัน URL ยาวเกินตอนค้นด้วย .in) */
+function chunks<T>(arr: T[], n: number) {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+}
+
+/**
+ * คอนโดที่มีลีด (เฉพาะที่จะถูกโทร) + เสียงในคลังที่จับคู่ได้ (ด้วย condo_id ก่อน แล้วค่อยชื่อ)
+ * คลังทั้งหมด (~2 หมื่นโครงการจากชีท) ไม่ดึงมาหมด → สร้างเสียงเฉพาะคอนโดที่มีลีดจริง
+ */
 export async function buildLibrary(db: SupabaseClient): Promise<Entry[]> {
-  const [groups, { data: rows }] = await Promise.all([leadGroups(db), db.from("condo_audio").select("*")]);
+  const groups = await leadGroups(db);
+  const ids = [...new Set([...groups.values()].map((g) => g.condo_id).filter(Boolean) as string[])];
+  const names = [...new Set([...groups.values()].map((g) => g.condo))];
+  const rows: any[] = [];
+  for (const c of chunks(ids, 200)) {
+    const { data } = await db.from("condo_audio").select("*").in("condo_id", c);
+    rows.push(...(data ?? []));
+  }
+  for (const c of chunks(names, 40)) {
+    const { data } = await db.from("condo_audio").select("*").in("condo", c);
+    rows.push(...(data ?? []));
+  }
   const byId = new Map<string, any>();
   const byName = new Map<string, any>();
-  for (const a of rows ?? []) {
+  for (const a of rows) {
     if (a.condo_id) byId.set(String(a.condo_id), a);
     byName.set(a.condo, a);
   }
-  const used = new Set<string>();
   const out: Entry[] = [];
   for (const [key, g] of groups) {
     const a = (g.condo_id && byId.get(g.condo_id)) || byName.get(g.condo) || null;
-    if (a) used.add(a.condo);
     out.push({ key, condo: a?.condo ?? g.condo, condo_id: g.condo_id ?? a?.condo_id ?? null, n: g.n, a });
   }
-  // คอนโดที่นำเข้าจากชีทแต่ยังไม่มีลีด
-  for (const a of rows ?? []) if (!used.has(a.condo)) out.push({ key: a.condo_id ? `id:${a.condo_id}` : `name:${a.condo}`, condo: a.condo, condo_id: a.condo_id ?? null, n: 0, a });
   return out;
 }
 
