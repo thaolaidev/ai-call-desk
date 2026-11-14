@@ -121,7 +121,7 @@ export default async function ScriptPage() {
               <Down />
               <div className="step condo">
                 <div className="step-h"><span className="step-no">ราคา</span><b>ราคาห้อง (ต่อห้อง)</b></div>
-                <p className="step-txt">เช่น “หนึ่งหมื่นห้าพัน” · ต้องให้ dev ส่งราคาห้องมาใน API ก่อน แล้วระบบจะให้ Botnoi อ่านตัวเลขและเก็บไว้ใช้ซ้ำ</p>
+                <p className="step-txt">เช่น “หนึ่งหมื่นห้าพัน” · ดึงจาก <Link href="/prices">คลังราคา</Link> ตามราคาของลีด · ลีดไม่มีราคา → ข้ามท่อนนี้</p>
               </div>
               <Down />
               <Card k="04-2" />

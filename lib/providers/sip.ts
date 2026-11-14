@@ -2,6 +2,7 @@ import { createAdminClient } from "../supabase/admin";
 import { STEPS } from "../script";
 import { loadPlaylist } from "../playlist";
 import { findCondoAudio } from "../condolib";
+import { findPriceAudio } from "../priceaudio";
 import type { CallProvider } from "./types";
 
 /**
@@ -16,10 +17,11 @@ export const sipProvider: CallProvider = {
     if (!base || !process.env.VOICE_SECRET) throw new Error("ยังไม่ได้ตั้ง VOICE_SERVER_URL / VOICE_SECRET");
     const db = createAdminClient();
     const bucket = db.storage.from("script-audio");
-    const [{ data: rows }, playlist, condo] = await Promise.all([
+    const [{ data: rows }, playlist, condo, price] = await Promise.all([
       db.from("script_audio").select("step_key, path"),
       loadPlaylist(db),
       findCondoAudio(db, { condo: lead.condo, condo_id: lead.condo_id ?? null }),
+      findPriceAudio(db, lead.rent),
     ]);
     const audio: Record<string, string> = {};
     for (const r of rows ?? []) if (STEPS[r.step_key]) audio[r.step_key] = bucket.getPublicUrl(r.path).data.publicUrl;
@@ -37,7 +39,8 @@ export const sipProvider: CallProvider = {
         titles: Object.fromEntries(Object.values(STEPS).map((s) => [s.key, s.text])),
         // ใส่ ?v=เวลาที่สร้าง → ถ้า "อ่านใหม่" หรืออัปโหลดทับ server เสียงจะโหลดไฟล์ใหม่ ไม่ใช้ของเก่าที่จำไว้
         condo_url: condo?.path ? `${bucket.getPublicUrl(condo.path).data.publicUrl}?v=${Date.parse(condo.generated_at ?? condo.updated_at ?? "") || 0}` : null,
-        price_url: null,
+        // เสียงราคาห้องของลีดนี้ (ไม่มี → ข้ามท่อนถามราคา)
+        price_url: price?.path ? `${bucket.getPublicUrl(price.path).data.publicUrl}?v=${Date.parse(price.generated_at ?? price.updated_at ?? "") || 0}` : null,
       }),
       signal: AbortSignal.timeout(30_000),
     });

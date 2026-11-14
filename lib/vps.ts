@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ingestLeads, type IngestResult } from "./ingest";
 import { fillMissingCondoAudio } from "./botnoi";
+import { fillMissingPriceAudio } from "./priceaudio";
 
 /** API ฝั่งเว็บเท่าไหร่ เช่น https://thaolai.com/service/api/v1/ai-call */
 export const vpsBase = () => (process.env.VPS_API_URL ?? "").replace(/\/+$/, "");
@@ -77,6 +78,7 @@ export async function pullLeads(db: SupabaseClient): Promise<IngestResult & { er
   const result = await ingestLeads(db, items);
   // คอนโดใหม่ที่ยังไม่มีเสียงชื่อ → ให้ Botnoi อ่านแล้วเก็บไว้ใช้ซ้ำ
   await fillMissingCondoAudio(db, 5).catch(() => null);
+  await fillMissingPriceAudio(db, 5).catch(() => null);
   return result;
 }
 

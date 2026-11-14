@@ -25,7 +25,7 @@ export function defaultReading(condo: string): string | null {
 }
 
 /** สร้างไฟล์เสียงจาก Botnoi → ได้ไฟล์ mp3 */
-async function botnoiTts(text: string): Promise<ArrayBuffer> {
+export async function botnoiTts(text: string): Promise<ArrayBuffer> {
   const speaker = process.env.BOTNOI_SPEAKER || DEFAULT_SPEAKER;
   const body: Record<string, unknown> = VERSION === "clone"
     ? { text, speaker, type_media: "mp3", save_file: "True", language: "th" }
