@@ -109,7 +109,8 @@ export default async function ScriptPage() {
           <div className="branches">
             <section className="branch bad" aria-label="ทางห้องไม่ว่าง">
               <Fork label="ห้องไม่ว่าง" />
-              <div className="end">วางสาย · ผล: ไม่ว่าง</div>
+              <Card k="02B" />
+              <div className="end">วางสายทันที · ผล: ไม่ว่าง</div>
             </section>
 
             <section className="branch good" aria-label="ทางห้องว่าง">

@@ -246,7 +246,7 @@ async function runFlow(s) {
   const map = { no: "not_avail", callback: "callback", dnc: "dnc", wrong: "wrong_number" };
   if (a.intent !== "yes") {
     live.outcome = map[a.intent] ?? "unclear";
-    await P("09");
+    await P("02B"); // "ขอบคุณค่ะ" แล้ววางสายเลย (ไม่พูดเรื่องส่งโปรไฟล์)
     return hangup(s);
   }
   live.outcome = "avail";
