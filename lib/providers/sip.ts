@@ -35,7 +35,8 @@ export const sipProvider: CallProvider = {
         audio,
         enabled: playlist.filter((p) => p.enabled).map((p) => p.key),
         titles: Object.fromEntries(Object.values(STEPS).map((s) => [s.key, s.text])),
-        condo_url: condo?.path ? bucket.getPublicUrl(condo.path).data.publicUrl : null,
+        // ใส่ ?v=เวลาที่สร้าง → ถ้า "อ่านใหม่" หรืออัปโหลดทับ server เสียงจะโหลดไฟล์ใหม่ ไม่ใช้ของเก่าที่จำไว้
+        condo_url: condo?.path ? `${bucket.getPublicUrl(condo.path).data.publicUrl}?v=${Date.parse(condo.generated_at ?? condo.updated_at ?? "") || 0}` : null,
         price_url: null,
       }),
       signal: AbortSignal.timeout(30_000),
