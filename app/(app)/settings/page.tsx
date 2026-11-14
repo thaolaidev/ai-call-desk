@@ -34,6 +34,7 @@ export default async function SettingsPage() {
     gemini: !!process.env.GEMINI_API_KEY,
     vps: !!process.env.VPS_API_URL && !!process.env.VPS_API_KEY,
     botnoi: !!process.env.BOTNOI_TOKEN,
+    voice: !!process.env.VOICE_SERVER_URL && !!process.env.VOICE_SECRET,
   };
   const callbackUrl = `${site}/api/yalecom/callback${process.env.YALECOM_CALLBACK_TOKEN ? "?token=<YALECOM_CALLBACK_TOKEN>" : ""}`;
 
@@ -98,7 +99,8 @@ export default async function SettingsPage() {
               <label htmlFor="provider">ระบบโทร</label>
               <select id="provider" name="provider" defaultValue={s.provider}>
                 <option value="simulate">โหมดจำลอง (ไม่โทรจริง)</option>
-                <option value="yalecom">Yalecom (เล่นเสียงอัด + ถอดเสียงคำตอบ)</option>
+                <option value="sip">Server เสียงของเรา (SIP) · แยกทางตามคำตอบ</option>
+                <option value="yalecom">Yalecom Robocall (เล่นเสียงอัด + ถอดเสียงคำตอบ)</option>
                 <option value="vapi">Vapi (AI คุยสด)</option>
               </select>
             </div>
@@ -134,6 +136,7 @@ export default async function SettingsPage() {
           <div className="card-b">
             <dl className="kv">
               <dt>เว็บเท่าไหร่ (VPS_API_URL / VPS_API_KEY)</dt><dd>{env.vps ? `ตั้งแล้ว · ดึงลีดทุกวัน ${s.pull_time ?? "09:00"} · ส่งผลกลับทุก ${s.sync_every_min ?? 30} นาที${s.last_pull_at ? ` · ล่าสุด ${new Date(s.last_pull_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })}` : ""}` : "ยังไม่ตั้ง"}</dd>
+              <dt>Server เสียง (VOICE_SERVER_URL / VOICE_SECRET)</dt><dd>{env.voice ? `ตั้งแล้ว · ${process.env.VOICE_SERVER_URL}` : "ยังไม่ตั้ง"}</dd>
               <dt>Botnoi อ่านชื่อคอนโด (BOTNOI_TOKEN)</dt><dd>{env.botnoi ? `ตั้งแล้ว · ${(process.env.BOTNOI_VERSION ?? "v2").toUpperCase()} · ผู้พูด ${process.env.BOTNOI_SPEAKER || "Ava (ค่าเริ่มต้น)"}` : "ยังไม่ตั้ง"}</dd>
               <dt>Yalecom (YALECOM_COMPANY_ID / KEY)</dt><dd>{env.yalecom ? "ตั้งแล้ว" : "ยังไม่ตั้ง"}</dd>
               <dt>ถอดเสียง + จัดผล</dt><dd>{env.gemini ? "Gemini (ตั้งแล้ว)" : env.openai ? "OpenAI (ตั้งแล้ว)" : "ยังไม่ตั้ง GEMINI_API_KEY หรือ OPENAI_API_KEY"}</dd>

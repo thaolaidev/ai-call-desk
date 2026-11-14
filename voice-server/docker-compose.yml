@@ -1,0 +1,25 @@
+# server เสียงของ Thaolai: Asterisk (ต่อ SIP Trunk) + โปรแกรมคุมบทโทร
+# ใช้ network_mode: host เพื่อให้ SIP/RTP ผ่าน NAT ได้ง่าย (ต้องเปิดพอร์ตตาม README)
+services:
+  asterisk:
+    build: { context: ., dockerfile: Dockerfile.asterisk }
+    network_mode: host
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - sounds:/var/lib/asterisk/sounds/thaolai
+      - recordings:/var/spool/asterisk/recording
+
+  voice:
+    build: { context: ., dockerfile: Dockerfile.app }
+    network_mode: host
+    env_file: .env
+    restart: unless-stopped
+    depends_on: [asterisk]
+    volumes:
+      - sounds:/var/lib/asterisk/sounds/thaolai
+      - recordings:/var/spool/asterisk/recording
+
+volumes:
+  sounds:
+  recordings:

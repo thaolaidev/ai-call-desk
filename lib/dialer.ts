@@ -3,6 +3,7 @@ import { applyCallResult } from "./outcome";
 import { simulateConversation, simulateProvider } from "./providers/simulate";
 import { vapiProvider } from "./providers/vapi";
 import { yalecomProvider } from "./providers/yalecom";
+import { sipProvider } from "./providers/sip";
 import { pollYalecom } from "./ivr";
 import { bkkClock, todayRangeBKK, toMinutes } from "./time";
 import { syncPending } from "./sync";
@@ -73,7 +74,7 @@ export async function tick(): Promise<TickReport> {
   }
 
   const { from, to } = todayRangeBKK();
-  const provider = s.provider === "vapi" ? vapiProvider : s.provider === "yalecom" ? yalecomProvider : simulateProvider;
+  const provider = s.provider === "vapi" ? vapiProvider : s.provider === "yalecom" ? yalecomProvider : s.provider === "sip" ? sipProvider : simulateProvider;
 
   for (const room of active) {
     const [{ count: inflight }, { count: today }] = await Promise.all([

@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 export async function updateSettings(formData: FormData) {
   const supabase = await createClient();
   const p = String(formData.get("provider"));
-  const provider = p === "vapi" || p === "yalecom" ? p : "simulate";
+  const provider = p === "vapi" || p === "yalecom" || p === "sip" ? p : "simulate";
   await supabase
     .from("settings")
     .update({

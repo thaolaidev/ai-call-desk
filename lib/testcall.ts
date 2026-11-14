@@ -3,6 +3,7 @@ import { normalizePhone } from "./phone";
 import { simulateProvider } from "./providers/simulate";
 import { vapiProvider } from "./providers/vapi";
 import { yalecomProvider } from "./providers/yalecom";
+import { sipProvider } from "./providers/sip";
 import { findCdrByRef } from "./yalecom";
 import { processYalecomCall } from "./ivr";
 
@@ -56,7 +57,7 @@ export async function startTestCall(phoneRaw: string, condo: string, segment: "n
   }
   await db.from("leads").update({ prev_status: lead.status, status: "calling" }).eq("id", lead.id);
 
-  const provider = s.provider === "vapi" ? vapiProvider : s.provider === "yalecom" ? yalecomProvider : simulateProvider;
+  const provider = s.provider === "vapi" ? vapiProvider : s.provider === "yalecom" ? yalecomProvider : s.provider === "sip" ? sipProvider : simulateProvider;
   const { data: call, error } = await db
     .from("calls")
     .insert({ lead_id: lead.id, provider: provider.name, attempt: lead.attempts + 1, from_status: lead.status, segment: lead.segment })

@@ -3,6 +3,7 @@ export type StartArgs = {
   lead: {
     id: string; owner_name: string; phone: string; condo: string; unit: string | null; rent: number | null;
     customer_nationalities: string | null; viewing_when: string | null; external_id?: string | null;
+    segment?: string | null; condo_id?: string | null;
   };
   settings: {
     company: string; default_nationalities: string; viewing_when: string;
@@ -14,6 +15,6 @@ export type StartArgs = {
 export type StartResult = { providerCallId?: string | null; simEndAt?: string | null };
 
 export interface CallProvider {
-  name: "simulate" | "vapi" | "yalecom";
+  name: "simulate" | "vapi" | "yalecom" | "sip";
   start(args: StartArgs): Promise<StartResult>;
 }
