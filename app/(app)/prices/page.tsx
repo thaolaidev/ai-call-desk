@@ -86,14 +86,14 @@ export default async function PricesPage({ searchParams }: { searchParams: SP })
 
         <div className="card">
           <div className="tbl-wrap">
-            <table className="tbl" style={{ minWidth: 900 }}>
+            <table className="tbl stack" style={{ minWidth: 900 }}>
               <thead><tr><th>ราคา (บาท)</th><th>ลีด</th><th>คำอ่าน</th><th>เสียง</th></tr></thead>
               <tbody>
                 {rows.map(({ price, n, a }) => (
                   <tr key={price}>
-                    <td><b className="mono" style={{ fontWeight: 500 }}>{price.toLocaleString()}</b><div className="hint mono">{priceFile(price)}</div></td>
-                    <td className="mono">{n}</td>
-                    <td style={{ minWidth: 280 }}>
+                    <td data-label="ราคา (บาท)"><b className="mono" style={{ fontWeight: 500 }}>{price.toLocaleString()}</b><div className="hint mono">{priceFile(price)}</div></td>
+                    <td className="mono" data-label="ลีด">{n}</td>
+                    <td style={{ minWidth: 280 }} data-label="คำอ่าน">
                       <form action={savePrice} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                         <input type="hidden" name="price" value={price} />
                         <input name="tts_text" defaultValue={a?.tts_text ?? ""} placeholder={thaiNumber(price)} aria-label={`คำอ่าน ${price}`} style={{ flex: "1 1 200px", padding: "6px 8px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--surface)" }} />
@@ -101,7 +101,7 @@ export default async function PricesPage({ searchParams }: { searchParams: SP })
                         {botnoiReady() && <SaveButton className="btn sm" formAction={regenPrice} label={a?.path ? "อ่านใหม่" : "สร้างเสียง"} done="สร้างเสียงแล้ว" />}
                       </form>
                     </td>
-                    <td style={{ minWidth: 250 }}>
+                    <td style={{ minWidth: 250 }} data-label="เสียง">
                       {a?.path ? (
                         <>
                           <audio controls preload="none" src={urlOf(a.path)} style={{ width: 230, height: 32, display: "block" }} />

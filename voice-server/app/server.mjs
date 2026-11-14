@@ -296,6 +296,9 @@ async function runFlow(s) {
 
 async function hangup(s) {
   if (s.gone) return;
+  // รอเสียงท่อนสุดท้ายออกไปถึงปลายสายให้หมดก่อน ไม่งั้นคำท้าย ("สวัสดีค่ะ") จะถูกตัด
+  await new Promise((r) => setTimeout(r, 1200));
+  if (s.gone) return;
   await ari("DELETE", `/channels/${s.id}`).catch(() => {});
 }
 

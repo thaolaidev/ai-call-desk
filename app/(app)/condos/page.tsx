@@ -94,7 +94,7 @@ export default async function CondosPage({ searchParams }: { searchParams: SP })
 
         <div className="card">
           <div className="tbl-wrap">
-            <table className="tbl" style={{ minWidth: 980 }}>
+            <table className="tbl stack" style={{ minWidth: 980 }}>
               <thead><tr><th>ID</th><th>ชื่อคอนโด</th><th>คำอ่าน</th><th>เสียง</th></tr></thead>
               <tbody>
                 {shown.map(({ key, condo, condo_id, n, a }) => {
@@ -102,12 +102,12 @@ export default async function CondosPage({ searchParams }: { searchParams: SP })
                   const fields: Record<string, string> = { condo, ...(condo_id ? { condo_id } : {}) };
                   return (
                     <tr key={key}>
-                      <td className="mono">{condo_id ?? <span className="hint">ยังไม่มี</span>}</td>
-                      <td style={{ maxWidth: 240 }}>
+                      <td className="mono" data-label="ID">{condo_id ?? <span className="hint">ยังไม่มี</span>}</td>
+                      <td style={{ maxWidth: 240 }} data-label="ชื่อคอนโด">
                         <b style={{ fontWeight: 500 }}>{condo}</b>
                         <div className="hint">{n} ลีด · <span className="mono">{file}</span> <CopyButton text={file} /></div>
                       </td>
-                      <td style={{ minWidth: 260 }}>
+                      <td style={{ minWidth: 260 }} data-label="คำอ่าน">
                         <form action={saveCondo} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                           {Object.entries(fields).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
                           <input name="tts_text" defaultValue={a?.tts_text ?? ""} placeholder={defaultReading(condo) ?? "ไม่มีชื่อไทย ใส่คำอ่านเอง"} aria-label={`คำอ่าน ${condo}`} style={{ flex: "1 1 200px", padding: "6px 8px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--surface)" }} />
@@ -116,7 +116,7 @@ export default async function CondosPage({ searchParams }: { searchParams: SP })
                           <label className="toggle small" title="ส่งไฟล์เข้า Yalecom แล้ว"><input type="checkbox" name="ready" defaultChecked={!!a?.ready} />อยู่ใน Yalecom</label>
                         </form>
                       </td>
-                      <td style={{ minWidth: 250 }}>
+                      <td style={{ minWidth: 250 }} data-label="เสียง">
                         {a?.path ? (
                           <>
                             <audio controls preload="none" src={urlOf(a.path)} style={{ width: 230, height: 32, display: "block" }} />

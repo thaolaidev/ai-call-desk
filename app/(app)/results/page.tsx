@@ -82,7 +82,7 @@ export default async function ResultsPage({ searchParams }: { searchParams: SP }
             {(list ?? []).map((x: any) => {
               const l = Array.isArray(x.leads) ? x.leads[0] : x.leads;
               return (
-                <Link key={x.id} href={link({ id: x.id })} className={`ritem ${x.id === selId ? "on" : ""}`}>
+                <Link key={x.id} href={`${link({ id: x.id })}#detail`} className={`ritem ${x.id === selId ? "on" : ""}`}>
                   <span className="r1"><b>{l?.condo}</b><Pill status={x.outcome} /></span>
                   <span className="r1 small muted"><span className="mono">{fmtTime(x.started_at)} · {fmtDur(x.duration_sec)}</span><span>{seg === "all" && <span className="seg">{(x.segment ?? l?.segment) === "old" ? "เดิม" : "ใหม่"}</span>} คุณ{l?.owner_name} · ครั้งที่ {x.attempt}</span></span>
                   <span className="r2">{x.summary}</span>
@@ -92,7 +92,7 @@ export default async function ResultsPage({ searchParams }: { searchParams: SP }
             {!list?.length && <p className="empty">ยังไม่มีสายที่จบในหมวดนี้</p>}
           </div>
 
-          <div className="card">
+          <div className="card" id="detail" style={{ scrollMarginTop: 72 }}>
             {!c || !lead ? (
               <p className="empty">เลือกสายทางซ้ายเพื่อดูบทสนทนา</p>
             ) : (

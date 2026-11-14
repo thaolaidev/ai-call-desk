@@ -131,7 +131,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
             {tab !== "today" && <button className="btn sm primary">ส่งที่เลือกเข้าคิวโทรวันนี้</button>}
           </div>
           <div className="tbl-wrap">
-            <table className="tbl">
+            <table className="tbl stack">
               <thead>
                 <tr>
                   {tab !== "today" && <th><SelectAll /></th>}
@@ -146,19 +146,19 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
                     {tab !== "today" && (
                       <td><input type="checkbox" name="ids" value={l.id} disabled={!QUEUEABLE.includes(l.status as LeadStatus)} aria-label={`เลือก ${l.condo}`} /></td>
                     )}
-                    <td><b style={{ fontWeight: 500 }}>{l.condo}</b><br /><span className="muted small">{l.unit ?? "–"}</span></td>
-                    <td>คุณ{l.owner_name}<br /><span className="muted small">{l.source}</span></td>
-                    <td className="mono">{l.rent ? `฿${l.rent.toLocaleString("th-TH")}` : "–"}</td>
-                    <td className="mono">{prettyPhone(l.phone)}</td>
-                    <td className="small muted">
+                    <td data-label="คอนโด / ห้อง"><b style={{ fontWeight: 500 }}>{l.condo}</b><br /><span className="muted small">{l.unit ?? "–"}</span></td>
+                    <td data-label="เจ้าของ">คุณ{l.owner_name}<br /><span className="muted small">{l.source}</span></td>
+                    <td className="mono" data-label="ค่าเช่า">{l.rent ? `฿${l.rent.toLocaleString("th-TH")}` : "–"}</td>
+                    <td className="mono" data-label="เบอร์โทร">{prettyPhone(l.phone)}</td>
+                    <td className="small muted" data-label="เวลา">
                       {tab === "today"
                         ? l.status === "calling" ? "กำลังโทร" : l.next_call_at ? `${fmtTime(l.next_call_at)} น.` : "ตามคิว"
                         : tab === "called" ? fmtDateTime(l.last_called_at) : fmtDateTime(l.created_at)}
                     </td>
-                    <td className="small">{l.vps_status ?? "–"}<br /><span className="muted">{l.vps_updated_at ? `อัปเดต ${fmtDateTime(l.vps_updated_at)}` : "ไม่มีวันที่"}</span></td>
-                    <td><Pill status={l.status} /></td>
-                    <td className="mono">{l.attempts}</td>
-                    <td><p className={`clamp ${l.last_summary ? "" : "muted"}`}>{l.last_summary ?? "ยังไม่ได้โทร"}</p></td>
+                    <td className="small" data-label="บนเว็บ (VPS)">{l.vps_status ?? "–"}<br /><span className="muted">{l.vps_updated_at ? `อัปเดต ${fmtDateTime(l.vps_updated_at)}` : "ไม่มีวันที่"}</span></td>
+                    <td data-label="สถานะการโทร"><Pill status={l.status} /></td>
+                    <td className="mono" data-label="ครั้งที่โทร">{l.attempts}</td>
+                    <td data-label="สรุปจาก AI"><p className={`clamp ${l.last_summary ? "" : "muted"}`}>{l.last_summary ?? "ยังไม่ได้โทร"}</p></td>
                     <td>{l.last_call_id && <Link className="btn sm" href={`/results?id=${l.last_call_id}`}>ดูบทสนทนา</Link>}</td>
                   </tr>
                 ))}
