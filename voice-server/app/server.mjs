@@ -3,7 +3,7 @@
 import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
-import { readFile, writeFile, unlink, stat } from "node:fs/promises";
+import { readFile, writeFile, unlink, stat, rename } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -19,6 +19,8 @@ const CFG = {
   resultUrl: env("WEB_RESULT_URL", ""),
   geminiKey: env("GEMINI_API_KEY", ""),
   geminiModel: env("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+  // คำถามสำคัญ (ห้องว่างไหม) ใช้รุ่นที่ฟังแม่นกว่า เพราะ "ไม่ว่าง" กับ "ยังว่าง" เสียงคล้ายกันมากทางโทรศัพท์
+  geminiModelKey: env("GEMINI_MODEL_KEY", "gemini-3.8-flash"),
   geminiUrl: env("GEMINI_URL", "https://generativelanguage.googleapis.com/v1beta/models"),
   endpoint: env("SIP_ENDPOINT", "PJSIP/{number}@yalecom"),
   callerId: env("CALLER_ID", ""),
@@ -105,7 +107,12 @@ async function onEvent(e) {
       if (s) { s.cause = e.cause; s.gone = true; for (const k of [...s.pending]) release(k, { hangup: true }); finish(s); }
       break;
     case "PlaybackFinished":
-      if (e.playback?.state === "failed") log("playback failed", e.playback.media_uri);
+      if (e.playback?.state === "failed") {
+        log("playback failed", e.playback.media_uri);
+        // ลบไฟล์ใน cache ทิ้ง สายถัดไปจะดาวน์โหลดและแปลงใหม่
+        const f = String(e.playback.media_uri ?? "").replace(/^sound:/, "");
+        if (f.startsWith(CFG.sounds)) unlink(`${f}.wav`).catch(() => {});
+      }
       release(`playback:${e.playback.id}`, {});
       break;
     case "RecordingFinished":
@@ -125,9 +132,17 @@ async function prepare(url) {
     const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
     if (!res.ok) throw new Error(`โหลดไฟล์เสียงไม่ได้ ${res.status}: ${url}`);
     const tmp = `/tmp/${name}-${Date.now()}`;
+    const part = `${CFG.sounds}/${name}.part.wav`;
     await writeFile(tmp, Buffer.from(await res.arrayBuffer()));
-    try { await run("ffmpeg", ["-loglevel", "error", "-y", "-i", tmp, "-ar", "8000", "-ac", "1", "-acodec", "pcm_s16le", out]); }
-    finally { await unlink(tmp).catch(() => {}); }
+    try {
+      // แปลงลงไฟล์ชั่วคราวก่อน แล้วค่อยเปลี่ยนชื่อ → ไม่มีไฟล์ครึ่งๆ กลางๆ ค้างใน cache
+      await run("ffmpeg", ["-loglevel", "error", "-y", "-i", tmp, "-ar", "8000", "-ac", "1", "-acodec", "pcm_s16le", part]);
+      if ((await stat(part)).size < 1000) throw new Error(`ไฟล์เสียงว่างหรือเสีย: ${url}`);
+      await rename(part, out);
+    } finally {
+      await unlink(tmp).catch(() => {});
+      await unlink(part).catch(() => {});
+    }
   }
   return `${CFG.sounds}/${name}`; // path เต็ม (Asterisk รับ sound:/path/file โดยไม่ต้องใส่นามสกุล)
 }
@@ -163,7 +178,8 @@ async function listen(s, kind, question) {
 }
 
 const KINDS = {
-  avail: 'ห้องยังว่างไหม → intent: "yes" (ว่าง) | "no" (ไม่ว่าง/มีคนเช่า/ขายแล้ว) | "callback" (ไม่สะดวก ให้โทรใหม่) | "dnc" (ไม่ให้ติดต่อ/ไม่ฝากเอเจนต์) | "wrong" (ไม่ใช่เจ้าของ) | "unclear"',
+  avail: 'ห้องยังว่างไหม → intent: "yes" (ว่าง/ยังว่าง) | "no" (ไม่ว่าง/มีคนเช่า/ขายแล้ว) | "callback" (ไม่สะดวก ให้โทรใหม่) | "dnc" (ไม่ให้ติดต่อ/ไม่ฝากเอเจนต์) | "wrong" (ไม่ใช่เจ้าของ) | "unclear"\n' +
+    'ระวังเป็นพิเศษ: "ไม่ว่าง" กับ "ยังว่าง" ฟังคล้ายกันมากทางโทรศัพท์ ให้ฟังพยางค์แรกให้ชัด ("ไม่" เสียงสั้น สระ ไ / "ยัง" มีตัวสะกด ง) และดูคำอื่นประกอบ เช่น "มีคนเช่าแล้ว" "ไม่ค่ะ" · ถ้าไม่แน่ใจ ให้ตอบ "unclear"',
   ready: 'พร้อมเข้าอยู่เลยไหม → intent: "yes" | "no" | "unclear" · ถ้าบอกวันที่/เดือนที่ว่าง ให้ใส่ available_from',
   date: 'ว่างวันที่เท่าไหร่ → intent: "answered" | "unclear" · available_from = วันที่ตามที่เจ้าของพูด',
   month: 'เดือนไหน → intent: "answered" | "unclear" · available_from = เดือนตามที่เจ้าของพูด',
@@ -176,9 +192,9 @@ async function understand(kind, question, wav) {
   const prompt =
     `เสียงนี้คือคำตอบของเจ้าของห้องคอนโด (ภาษาไทย ทางโทรศัพท์) ต่อคำถาม "${question}"\n` +
     `${KINDS[kind]}\nห้ามเดา ถ้าฟังไม่ออกให้ unclear\n` +
-    'ตอบ JSON เท่านั้น: {"text": string, "intent": string, "available_from": string|null, "owner_price": number|null, "asks_nationality": boolean}';
+    'ตอบ JSON เท่านั้น: {"text": string, "intent": string, "confidence": number (0-1), "available_from": string|null, "owner_price": number|null, "asks_nationality": boolean}';
   try {
-    const res = await fetch(`${CFG.geminiUrl}/${CFG.geminiModel}:generateContent`, {
+    const res = await fetch(`${CFG.geminiUrl}/${kind === "avail" ? CFG.geminiModelKey : CFG.geminiModel}:generateContent`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": CFG.geminiKey },
       signal: AbortSignal.timeout(8000),
@@ -191,7 +207,10 @@ async function understand(kind, question, wav) {
     const body = await res.json();
     const t = body?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "{}";
     const j = JSON.parse(t.replace(/^```json\s*|\s*```$/g, ""));
-    return { intent: String(j.intent ?? "unclear"), text: String(j.text ?? ""), available_from: j.available_from ?? null, owner_price: j.owner_price ?? null, asks_nationality: !!j.asks_nationality };
+    // ไม่มั่นใจ → ถือว่าฟังไม่ชัด ให้ถามซ้ำ
+    const conf = Number(j.confidence);
+    const intent = Number.isFinite(conf) && conf < 0.7 ? "unclear" : String(j.intent ?? "unclear");
+    return { intent, confidence: Number.isFinite(conf) ? conf : null, heard: String(j.intent ?? ""), text: String(j.text ?? ""), available_from: j.available_from ?? null, owner_price: j.owner_price ?? null, asks_nationality: !!j.asks_nationality };
   } catch (err) {
     return { intent: "unclear", text: "", error: err.message };
   }

@@ -51,15 +51,23 @@ export async function POST(req: NextRequest) {
 
   const live = (r.live ?? {}) as Record<string, any>;
   const liveOutcome = OUTCOMES.includes(live.outcome) ? (live.outcome as Outcome) : "unclear";
-  const outcome: Outcome = liveOutcome !== "unclear" ? liveOutcome : full?.outcome ?? "unclear";
+  // ผลหลัก: AI ที่ฟังเสียงทั้งสายหลังจบ (รุ่นใหญ่กว่า เห็นบริบทครบ) · ถ้าฟังทั้งสายไม่ได้ ใช้คำตอบที่ฟังระหว่างสาย
+  const fullOutcome = full && !full.error ? full.outcome : null;
+  const groupOf = (o?: string | null) => (o?.startsWith("avail") ? "avail" : o ?? "");
+  const disagree = !!fullOutcome && fullOutcome !== "unclear" && liveOutcome !== "unclear" && groupOf(fullOutcome) !== groupOf(liveOutcome);
+  // ตรงกัน → ใช้ผลระหว่างสาย (ละเอียดกว่า เช่น ว่าง · รับต่างชาติ) · ขัดกัน → เชื่อผลฟังทั้งสาย
+  const outcome: Outcome = disagree ? (fullOutcome as Outcome) : liveOutcome !== "unclear" ? liveOutcome : fullOutcome ?? "unclear";
   const answers: any[] = Array.isArray(r.answers) ? r.answers : [];
   const pick = (k: string) => live[k] ?? (full?.details as any)?.[k] ?? null;
+  // ถ้าระหว่างสายกับหลังจบได้ผลไม่ตรงกัน (เช่น "ยังว่าง" กับ "ไม่ว่าง") → ใช้ผลหลังจบ และติดธงให้แอดมินฟังซ้ำ
+  const conflict = disagree;
+  const liveSummary = answers.filter((a) => a.text).map((a) => `${a.question ?? a.step}: "${a.text}"`).join(" · ");
 
   await applyCallResult(db, {
     callId: call.id,
     outcome,
     durationSec: Number(r.duration_sec) || null,
-    summary: full?.summary || answers.map((a) => a.text).filter(Boolean).join(" · ") || null,
+    summary: `${conflict ? "⚠️ ควรฟังซ้ำ · " : ""}${full?.summary || (liveSummary ? `เจ้าของตอบ — ${liveSummary}` : "")}` || null,
     endedReason: "answered (sip)",
     analysis: {
       call_outcome: outcome,
@@ -71,6 +79,8 @@ export async function POST(req: NextRequest) {
       accepts_foreigners: pick("accepts_foreigners"),
       current_lease_until: full?.current_lease_until ?? null,
       summary_th: full?.summary ?? null,
+      live_outcome: liveOutcome,
+      needs_review: conflict ? `ระหว่างสายได้ยินว่า "${liveOutcome}" แต่ฟังทั้งสายได้ "${fullOutcome}" — ควรฟังเสียงซ้ำ` : null,
       answer_text: answers.map((a) => a.text).filter(Boolean).join(" / "),
       transcript_full: full?.transcript ?? null,
     },
