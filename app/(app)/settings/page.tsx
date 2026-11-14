@@ -12,7 +12,8 @@ import { condoFileName } from "@/lib/yalecom";
 
 export const dynamic = "force-dynamic";
 
-export default async function SettingsPage() {
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ err?: string; saved?: string }> }) {
+  const sp = await searchParams;
   const sb = await createClient();
   const [{ data: s, error }, { data: roomRows }] = await Promise.all([
     sb.from("settings").select("*").eq("id", 1).single(),
@@ -59,6 +60,11 @@ export default async function SettingsPage() {
   return (
     <>
       <Top title="ตั้งค่าระบบ" sub="ระบบโทร บทของเอเจนต์ และการเชื่อมต่อ" />
+      {(sp.err || sp.saved) && (
+        <div className="view" style={{ paddingBottom: 0 }}>
+          <p className={`banner ${sp.err ? "err" : ""}`} role="status">{sp.err ?? "บันทึกแล้ว"}</p>
+        </div>
+      )}
       <div className="view">
         <form className="card" action={updateCampaign} id="campaign">
           <div className="card-h"><h2>ตั้งค่าการโทร</h2><button className="btn sm primary">บันทึก</button></div>

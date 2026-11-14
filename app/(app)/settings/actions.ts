@@ -1,12 +1,13 @@
 "use server";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 export async function updateSettings(formData: FormData) {
   const supabase = await createClient();
   const p = String(formData.get("provider"));
   const provider = p === "vapi" || p === "yalecom" || p === "sip" ? p : "simulate";
-  await supabase
+  const { error } = await supabase
     .from("settings")
     .update({
       provider,
@@ -28,6 +29,11 @@ export async function updateSettings(formData: FormData) {
       .eq("segment", seg);
   }
   revalidatePath("/settings");
+  if (error) {
+    const hint = /provider_check/.test(error.message) ? " · ฐานข้อมูลยังไม่รู้จักระบบโทรนี้ ให้รัน update_0008-0013.sql ใน Supabase ก่อน" : "";
+    redirect(`/settings?err=${encodeURIComponent(`บันทึกไม่สำเร็จ: ${error.message}${hint}`)}`);
+  }
+  redirect("/settings?saved=1");
 }
 
 /** บันทึกคำอ่านชื่อคอนโด + สถานะว่าอัปโหลดไฟล์เสียงเข้า Yalecom แล้วหรือยัง */
