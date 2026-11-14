@@ -31,7 +31,7 @@ export const sipProvider: CallProvider = {
       body: JSON.stringify({
         call_id: callId,
         phone: lead.phone,
-        mode: lead.segment === "old" ? "short" : "full", // ทรัพย์เดิม: ถามแค่ว่าง/ไม่ว่าง
+        mode: "full", // ทั้งห้องทรัพย์ใหม่และทรัพย์เดิมใช้บทโทรชุดเดียวกัน
         audio,
         enabled: playlist.filter((p) => p.enabled).map((p) => p.key),
         titles: Object.fromEntries(Object.values(STEPS).map((s) => [s.key, s.text])),

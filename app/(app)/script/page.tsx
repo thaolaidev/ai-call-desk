@@ -56,7 +56,7 @@ export default async function ScriptPage() {
 
   return (
     <>
-      <Top title="บทโทร" sub={`ห้องทรัพย์ใหม่ · อัปโหลดไฟล์เสียงแล้ว ${done} / ${STEP_KEYS.length} ท่อน`}>
+      <Top title="บทโทร" sub={`ใช้ทั้งห้องทรัพย์ใหม่และทรัพย์เดิม · อัปโหลดไฟล์เสียงแล้ว ${done} / ${STEP_KEYS.length} ท่อน`}>
         {done > 0 && <a className="btn" href="/api/script/zip">ดาวน์โหลดทั้งหมด (zip) ส่ง Yalecom</a>}
       </Top>
       <div className="view">

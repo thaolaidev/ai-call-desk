@@ -18,7 +18,7 @@ const CFG = {
   ariPass: env("ARI_PASSWORD", ""),
   resultUrl: env("WEB_RESULT_URL", ""),
   geminiKey: env("GEMINI_API_KEY", ""),
-  geminiModel: env("GEMINI_MODEL", "gemini-2.5-flash-lite"),
+  geminiModel: env("GEMINI_MODEL", "gemini-3.5-flash-lite"),
   geminiUrl: env("GEMINI_URL", "https://generativelanguage.googleapis.com/v1beta/models"),
   endpoint: env("SIP_ENDPOINT", "PJSIP/{number}@yalecom"),
   callerId: env("CALLER_ID", ""),
@@ -52,21 +52,36 @@ const waiters = new Map(); // key → resolve (playback:<id>, recording:<name>)
 const sessions = new Map(); // channelId → session
 let wsUp = false;
 
+let ws = null;
+let lastUp = Date.now();
 function connectEvents() {
   // subscribeAll: ได้ event ของสายตั้งแต่เริ่มโทร (รวมสายที่ไม่รับ/เบอร์ผิด) ไม่พลาดแม้สายตัดเร็ว
   const url = `${CFG.ari.replace(/^http/, "ws")}/ari/events?app=${APP}&subscribeAll=true&api_key=${encodeURIComponent(`${CFG.ariUser}:${CFG.ariPass}`)}`;
-  const ws = new WebSocket(url);
-  ws.onopen = () => { wsUp = true; log("ARI connected"); };
-  ws.onclose = () => { wsUp = false; log("ARI disconnected, retry in 3s"); setTimeout(connectEvents, 3000); };
-  ws.onerror = () => {};
-  ws.onmessage = (m) => {
+  try { ws?.close(); } catch {}
+  const sock = new WebSocket(url);
+  ws = sock;
+  sock.onopen = () => { if (ws !== sock) return; wsUp = true; lastUp = Date.now(); log("ARI connected"); };
+  sock.onclose = () => { if (ws !== sock) return; if (wsUp) log("ARI disconnected"); wsUp = false; };
+  sock.onerror = () => {};
+  sock.onmessage = (m) => {
     let e;
     try { e = JSON.parse(typeof m.data === "string" ? m.data : Buffer.from(m.data).toString()); } catch { return; }
     onEvent(e).catch((err) => log("event error", err.message));
   };
 }
 
-/** รอ event ตาม key (playback:<id> / recording:<name>) · ถ้าวางสายระหว่างรอ จะถูกปล่อยพร้อม { hangup: true } */
+// เฝ้าการเชื่อมต่อ: หลุดเมื่อไหร่ต่อใหม่ทุก 5 วินาที · หลุดนานเกิน 2 นาที → ปิดตัวเองให้ Docker เปิดใหม่
+setInterval(async () => {
+  if (wsUp) {
+    lastUp = Date.now();
+    // เช็กว่า Asterisk ยังตอบจริง (กรณีโดนรีสตาร์ทแต่ socket ไม่รู้ตัว)
+    try { await ari("GET", "/asterisk/ping"); } catch { log("ARI ping failed, reconnect"); wsUp = false; connectEvents(); }
+    return;
+  }
+  if (Date.now() - lastUp > 120_000 && sessions.size === 0) { log("ARI down > 2 min, exiting for restart"); process.exit(1); }
+  connectEvents();
+}, 5000);
+
 function wait(s, key, ms) {
   return new Promise((resolve) => {
     const t = setTimeout(() => { waiters.delete(key); s.pending.delete(key); resolve({ timeout: true }); }, ms);
@@ -90,6 +105,7 @@ async function onEvent(e) {
       if (s) { s.cause = e.cause; s.gone = true; for (const k of [...s.pending]) release(k, { hangup: true }); finish(s); }
       break;
     case "PlaybackFinished":
+      if (e.playback?.state === "failed") log("playback failed", e.playback.media_uri);
       release(`playback:${e.playback.id}`, {});
       break;
     case "RecordingFinished":
@@ -113,7 +129,7 @@ async function prepare(url) {
     try { await run("ffmpeg", ["-loglevel", "error", "-y", "-i", tmp, "-ar", "8000", "-ac", "1", "-acodec", "pcm_s16le", out]); }
     finally { await unlink(tmp).catch(() => {}); }
   }
-  return `thaolai/${name}`;
+  return `${CFG.sounds}/${name}`; // path เต็ม (Asterisk รับ sound:/path/file โดยไม่ต้องใส่นามสกุล)
 }
 
 async function play(s, sound) {
@@ -171,7 +187,7 @@ async function understand(kind, question, wav) {
         generationConfig: { temperature: 0, responseMimeType: "application/json" },
       }),
     });
-    if (!res.ok) throw new Error(`Gemini ${res.status}`);
+    if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 160)}`);
     const body = await res.json();
     const t = body?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "{}";
     const j = JSON.parse(t.replace(/^```json\s*|\s*```$/g, ""));

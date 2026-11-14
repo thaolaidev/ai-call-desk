@@ -100,7 +100,7 @@ export async function classify(fullText: string): Promise<Classified> {
 export async function analyzeWithGemini(audio: ArrayBuffer): Promise<(Classified & { transcript: string }) | null> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
   const prompt =
     "นี่คือไฟล์เสียงโทรศัพท์ภาษาไทย ระหว่างเสียงอัด (บอท) ของบริษัทเท่าไหร่ดอทคอม กับเจ้าของห้องคอนโด\n" +
     "บอทเล่นคำถามต่อกันทั้งชุด เว้นช่วงสั้นๆ ให้เจ้าของตอบ: ห้องยังว่างไหม → พร้อมเข้าอยู่เลยไหม → ว่างวันที่/เดือนไหน → (ราคาห้องใช่ไหม) → รับลูกค้าต่างชาติไหม → แจ้งว่าแอดมินจะส่งโปรไฟล์ลูกค้า\n" +
