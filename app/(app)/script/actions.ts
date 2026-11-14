@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { STEPS } from "@/lib/script";
+import { DEFAULT_PLAY } from "@/lib/playlist";
 
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_DIRECT = 25 * 1024 * 1024;
@@ -52,14 +53,14 @@ export async function deleteStepAudio(formData: FormData) {
   revalidatePath("/script");
 }
 
-/** บันทึกลำดับที่เล่นในสาย: เล่นท่อนไหน + รอให้ตอบกี่วินาที */
+/** บันทึกว่าท่อนไหนเล่นในสาย (เวลารอคำตอบกำหนดตายตัวในระบบ: 3 วินาที) */
 export async function savePlaylist(formData: FormData) {
   const sb = await createClient();
   const now = new Date().toISOString();
   const rows = Object.keys(STEPS).map((k) => ({
     step_key: k,
     enabled: formData.get(`on_${k}`) === "on",
-    wait_after: Math.min(15, Math.max(0, Math.round(Number(formData.get(`wait_${k}`)) || 0))),
+    wait_after: DEFAULT_PLAY[k]?.wait ?? 0,
     updated_at: now,
   }));
   await sb.from("script_playlist").upsert(rows);

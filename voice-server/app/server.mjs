@@ -32,6 +32,7 @@ const CFG = {
   listenSilence: Number(env("LISTEN_SILENCE_SEC", 1)),
 };
 const APP = "thaolai";
+const ANSWER_SILENCE_SEC = 3; // กำหนดตายตัว ไม่ต้องตั้งในหน้าเว็บ
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 mkdirSync(CFG.sounds, { recursive: true });
 
@@ -159,13 +160,13 @@ async function play(s, sound) {
 }
 
 /** อัดคำตอบสั้นๆ ของเจ้าของ (หยุดเมื่อเงียบ) แล้วให้ Gemini ตีความ */
-async function listen(s, kind, question) {
+async function listen(s, kind, question, silenceSec) {
   if (s.gone) return { intent: "hangup" };
   const name = `ans-${s.callId}-${++s.turn}`;
   const done = wait(s, `recording:${name}`, (CFG.listenMax + 5) * 1000);
   try {
     await ari("POST", `/channels/${s.id}/record`, {
-      name, format: "wav", maxDurationSeconds: CFG.listenMax, maxSilenceSeconds: CFG.listenSilence, ifExists: "overwrite", beep: "false", terminateOn: "none",
+      name, format: "wav", maxDurationSeconds: Math.max(CFG.listenMax, (silenceSec ?? 0) + 7), maxSilenceSeconds: Math.max(1, Math.round(silenceSec ?? CFG.listenSilence)), ifExists: "overwrite", beep: "false", terminateOn: "none",
     });
   } catch (err) { release(`recording:${name}`); if (s.gone) return { intent: "hangup" }; throw err; }
   const r = await done;
@@ -232,6 +233,7 @@ async function understand(kind, question, wav) {
 // ---------- บทโทร (แยกทางตามคำตอบ) ----------
 async function runFlow(s) {
   const P = (k) => (s.on(k) ? play(s, s.snd[k]) : null);
+  const L = (kind, _step, q) => listen(s, kind, q, ANSWER_SILENCE_SEC); // เจ้าของเงียบ 3 วินาที = ตอบจบ
   const Q = (k) => s.title[k] ?? k;
   const live = (s.live = { outcome: "unclear", ready_now: null, available_from: null, price_confirmed: null, owner_price: null, accepts_foreigners: null });
 
@@ -239,8 +241,8 @@ async function runFlow(s) {
   await P("02-1");
   if (s.snd.condo) await play(s, s.snd.condo);
   await P("02-2");
-  let a = await listen(s, "avail", "ห้องยังว่างอยู่ไหม");
-  if (["silent", "unclear"].includes(a.intent) && !s.gone) { await P("02-2"); a = await listen(s, "avail", "ห้องยังว่างอยู่ไหม (ถามซ้ำ)"); }
+  let a = await L("avail", "02-2", "ห้องยังว่างอยู่ไหม");
+  if (["silent", "unclear"].includes(a.intent) && !s.gone) { await P("02-2"); a = await L("avail", "02-2", "ห้องยังว่างอยู่ไหม (ถามซ้ำ)"); }
   if (a.intent === "hangup" || s.gone) return;
 
   const map = { no: "not_avail", callback: "callback", dnc: "dnc", wrong: "wrong_number" };
@@ -255,18 +257,18 @@ async function runFlow(s) {
   // สอบถามรายละเอียด
   if (s.on("03")) {
     await P("03");
-    const r = await listen(s, "ready", Q("03"));
+    const r = await L("ready", "03", Q("03"));
     if (r.intent === "yes") live.ready_now = true;
     if (r.intent === "no") live.ready_now = false;
     if (r.available_from) live.available_from = r.available_from;
     if (r.intent !== "yes" && !live.available_from && !s.gone) {
-      if (s.on("03-1")) { await P("03-1"); const d = await listen(s, "date", Q("03-1")); if (d.available_from) live.available_from = d.available_from; }
-      if (s.on("03-2")) { await P("03-2"); const m = await listen(s, "month", Q("03-2")); if (m.available_from) live.available_from = [live.available_from, m.available_from].filter(Boolean).join(" "); }
+      if (s.on("03-1")) { await P("03-1"); const d = await L("date", "03-1", Q("03-1")); if (d.available_from) live.available_from = d.available_from; }
+      if (s.on("03-2")) { await P("03-2"); const m = await L("month", "03-2", Q("03-2")); if (m.available_from) live.available_from = [live.available_from, m.available_from].filter(Boolean).join(" "); }
     }
   }
   if (s.snd.price && s.on("04-1")) {
     await P("04-1"); await play(s, s.snd.price); await P("04-2");
-    const p = await listen(s, "price", "ราคาห้องปัจจุบันใช่ไหม");
+    const p = await L("price", "04-2", "ราคาห้องปัจจุบันใช่ไหม");
     if (p.intent === "yes") live.price_confirmed = true;
     if (p.intent === "no") live.price_confirmed = false;
     if (p.owner_price) live.owner_price = Number(p.owner_price) || null;
@@ -275,11 +277,11 @@ async function runFlow(s) {
   // ต่างชาติ
   if (s.on("05")) {
     await P("05");
-    let f = await listen(s, "foreign", Q("05"));
-    if (["silent", "unclear"].includes(f.intent) && !s.gone) { await P("05"); f = await listen(s, "foreign", `${Q("05")} (ถามซ้ำ)`); }
+    let f = await L("foreign", "05", Q("05"));
+    if (["silent", "unclear"].includes(f.intent) && !s.gone) { await P("05"); f = await L("foreign", "05", `${Q("05")} (ถามซ้ำ)`); }
     if (f.intent === "yes") {
       live.accepts_foreigners = true;
-      if (f.asks_nationality) await play(s, s.snd["06A"]);
+      if (f.asks_nationality && s.snd["06A"]) { await play(s, s.snd["06A"]); }
     } else if (f.intent === "no") {
       live.accepts_foreigners = false;
       for (const k of ["07-1", "07-2", "07-3", "07-4"]) await play(s, s.snd[k]); // อธิบายกฎเสมอเมื่อไม่รับ

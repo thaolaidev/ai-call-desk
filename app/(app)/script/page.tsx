@@ -20,7 +20,6 @@ export default async function ScriptPage() {
   const rows = new Map<string, Row>(((data ?? []) as Row[]).map((r) => [r.step_key, r]));
   const playlist = await loadPlaylist(sb);
   const preview = buildPlaybackList(playlist, "[ชื่อคอนโด]");
-  const waitTotal = preview.filter((f) => f === WAIT_FILE).length;
   const missingOn = playlist.filter((p) => p.enabled && !rows.has(p.key)).map((p) => p.key);
   const done = STEP_KEYS.filter((k) => rows.has(k)).length;
 
@@ -66,17 +65,16 @@ export default async function ScriptPage() {
         <form className="card" action={savePlaylist} style={{ marginBottom: 18 }}>
           <div className="card-h">
             <h2>ลำดับที่เล่นในสาย</h2>
-            <span className="hint">เล่นต่อกันทั้งชุด เว้นช่วงเงียบให้เจ้าของตอบ แล้ว AI ฟังเสียงอัดทีหลัง · เว้นตอบรวม ~{waitTotal} วินาที</span>
+            <span className="hint">บอทถาม → รอเจ้าของตอบ (เงียบ 3 วินาที = ตอบจบ) → พูดท่อนถัดไป</span>
           </div>
           <div className="tbl-wrap">
             <table className="tbl">
-              <thead><tr><th>ท่อน</th><th>เล่นในสาย</th><th>รอให้ตอบ (วินาที)</th><th>ไฟล์</th></tr></thead>
+              <thead><tr><th>ท่อน</th><th>เล่นในสาย</th><th>ไฟล์</th></tr></thead>
               <tbody>
                 {playlist.map((p) => (
                   <tr key={p.key}>
                     <td><span className="step-no">{p.key}</span> {STEPS[p.key].title}</td>
                     <td><label className="toggle"><input type="checkbox" name={`on_${p.key}`} defaultChecked={p.enabled} aria-label={`เล่นท่อน ${p.key}`} />เล่น</label></td>
-                    <td><input type="number" name={`wait_${p.key}`} min={0} max={15} defaultValue={p.wait} aria-label={`รอหลังท่อน ${p.key}`} style={{ width: 70, padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--surface)" }} /></td>
                     <td>{rows.has(p.key) ? <span className="pill t-ok">มีแล้ว</span> : <span className="pill t-wa">ยังไม่มี</span>}</td>
                   </tr>
                 ))}
