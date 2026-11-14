@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Top } from "@/components/Top";
 import { SaveButton } from "@/components/SaveButton";
+import { BotnoiTest } from "@/components/BotnoiTest";
 import { CopyButton } from "@/components/CopyButton";
 import { TestCallForm } from "@/components/TestCallForm";
 import { FIRST_MESSAGE, SYSTEM_PROMPT, ANALYSIS_SCHEMA, SUMMARY_PROMPT } from "@/lib/prompt";
@@ -12,6 +13,8 @@ const DAYS = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
 import { condoFileName } from "@/lib/yalecom";
 
 export const dynamic = "force-dynamic";
+
+export const maxDuration = 60; // โทรทดสอบ/ทดสอบ Botnoi รอสร้างเสียงได้
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ err?: string; saved?: string }> }) {
   const sp = await searchParams;
@@ -131,6 +134,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <div className="card">
           <div className="card-h"><h2>โทรทดสอบ 1 สาย</h2><span className="hint">โทรหาเบอร์ที่ใส่เท่านั้น ไม่แตะคิว · ใช้ระบบโทรที่เลือกไว้ด้านบน</span></div>
           <TestCallForm provider={s.provider} />
+        </div>
+
+        <div className="card">
+          <div className="card-h"><h2>ทดสอบเสียง Botnoi</h2><span className="hint">{env.botnoi ? `ใช้ ${(process.env.BOTNOI_VERSION ?? "v2").toUpperCase()} · ผู้พูด ${process.env.BOTNOI_SPEAKER || "Ava"}` : "ยังไม่ได้ตั้ง BOTNOI_TOKEN"}</span></div>
+          <BotnoiTest />
         </div>
 
         <div className="card">

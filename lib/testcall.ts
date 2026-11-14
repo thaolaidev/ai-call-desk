@@ -11,24 +11,31 @@ import { processYalecomCall } from "./ivr";
  * โทรทดสอบ 1 สายหาเบอร์ที่ระบุ ไม่ผ่านคิว ไม่สนว่าแคมเปญเปิดหรือปิด
  * สร้างลีด source = "ทดสอบ" ไว้ ผลจะขึ้นในหน้าผลการโทรเหมือนสายจริง (แต่ไม่ยิงกลับ VPS เพราะไม่มี external_id)
  */
-export async function startTestCall(phoneRaw: string, condo: string, segment: "new" | "old" = "old") {
+export const TEST_CONDO = "Ashton Asoke / แอชตัน อโศก";
+export const TEST_RENT = 12000;
+
+export async function startTestCall(phoneRaw: string, condo: string, segment: "new" | "old" = "old", rentRaw?: number | null) {
   const db = createAdminClient();
   const phone = normalizePhone(phoneRaw);
   if (phone.replace(/\D/g, "").length < 9) throw new Error("เบอร์โทรไม่ถูกต้อง");
   const { data: s } = await db.from("settings").select("*").eq("id", 1).single();
   if (!s) throw new Error("อ่าน settings ไม่ได้");
 
-  const condoName = condo.trim() || "ห้องทดสอบ";
+  const condoName = condo.trim() || TEST_CONDO;
+  const rent = rentRaw && rentRaw > 0 ? Math.round(rentRaw) : null;
+  // จับคู่กับคลังชื่อคอนโด (เอา condo_id มาด้วย ถ้ามี)
+  const { data: libRow } = await db.from("condo_audio").select("condo, condo_id").eq("condo", condoName).maybeSingle();
+  const condoId = libRow?.condo_id ?? null;
   const { data: existing } = await db.from("leads").select("*").eq("phone", phone).eq("condo", condoName).maybeSingle();
   let lead = existing;
-  if (lead && lead.segment !== segment) {
-    await db.from("leads").update({ segment }).eq("id", lead.id);
-    lead.segment = segment;
+  if (lead && (lead.segment !== segment || lead.rent !== rent || (condoId && lead.condo_id !== condoId))) {
+    await db.from("leads").update({ segment, rent, ...(condoId ? { condo_id: condoId } : {}) }).eq("id", lead.id);
+    Object.assign(lead, { segment, rent, ...(condoId ? { condo_id: condoId } : {}) });
   }
   if (!lead) {
     const { data, error } = await db
       .from("leads")
-      .insert({ owner_name: "ทดสอบ", phone, condo: condoName, source: "ทดสอบ", status: "new", segment })
+      .insert({ owner_name: "ทดสอบ", phone, condo: condoName, source: "ทดสอบ", status: "new", segment, rent, ...(condoId ? { condo_id: condoId } : {}) })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
@@ -57,6 +64,19 @@ export async function startTestCall(phoneRaw: string, condo: string, segment: "n
   }
   await db.from("leads").update({ prev_status: lead.status, status: "calling" }).eq("id", lead.id);
 
+  // เตรียมเสียงชื่อคอนโดและราคาก่อนโทร (ใช้ของเดิมถ้ามี) → ทดสอบการเชื่อม Botnoi ไปในตัว
+  const notes: string[] = [];
+  const { botnoiReady, ensureCondoAudio } = await import("./botnoi");
+  const { ensurePriceAudio } = await import("./priceaudio");
+  if (botnoiReady()) {
+    try { const r = await ensureCondoAudio(db, condoName, { condo_id: condoId }); notes.push(`ชื่อคอนโด ✓ ${r.reused ? "ใช้เสียงเดิม" : "Botnoi อ่านใหม่"}`); }
+    catch (e) { notes.push(`ชื่อคอนโด ✗ ${e instanceof Error ? e.message : e}`); }
+    if (rent) {
+      try { const r = await ensurePriceAudio(db, rent); notes.push(`ราคา ${rent.toLocaleString()} ✓ ${r.reused ? "ใช้เสียงเดิม" : "Botnoi อ่านใหม่"}`); }
+      catch (e) { notes.push(`ราคา ✗ ${e instanceof Error ? e.message : e}`); }
+    }
+  } else notes.push("ยังไม่ได้ตั้ง BOTNOI_TOKEN · ข้ามชื่อคอนโด/ราคา");
+
   const provider = s.provider === "vapi" ? vapiProvider : s.provider === "yalecom" ? yalecomProvider : s.provider === "sip" ? sipProvider : simulateProvider;
   const { data: call, error } = await db
     .from("calls")
@@ -71,7 +91,7 @@ export async function startTestCall(phoneRaw: string, condo: string, segment: "n
       .from("calls")
       .update({ provider_call_id: r.providerCallId ?? null, sim_end_at: r.simEndAt ?? null, state: provider.name === "simulate" ? "in_progress" : "dialing" })
       .eq("id", call.id);
-    return { callId: call.id, provider: provider.name };
+    return { callId: call.id, provider: provider.name, notes };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await db.from("calls").update({ state: "failed", ended_at: new Date().toISOString(), summary: msg }).eq("id", call.id);
