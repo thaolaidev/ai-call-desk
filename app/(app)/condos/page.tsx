@@ -16,7 +16,7 @@ export const maxDuration = 60;
 
 type SP = Promise<{ f?: string; q?: string; page?: string; msg?: string }>;
 const PER = 50;
-const TABS = [["all", "ทั้งหมด"], ["missing", "ยังไม่มีเสียง"], ["has", "มีเสียงแล้ว"], ["error", "สร้างไม่สำเร็จ"]] as const;
+const TABS = [["all", "มีลีด"], ["missing", "ยังไม่มีเสียง"], ["has", "มีเสียงแล้ว"], ["error", "สร้างไม่สำเร็จ"], ["lib", "คลังรวม"]] as const;
 
 export default async function CondosPage({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
@@ -29,7 +29,7 @@ export default async function CondosPage({ searchParams }: { searchParams: SP })
   const all = await buildLibrary(sb);
   const { count: libTotal } = await sb.from("condo_audio").select("condo", { count: "exact", head: true });
   // ค้นหา: รวมคอนโดในคลังทั้งหมด (จากชีท) ที่ยังไม่มีลีดด้วย
-  if (q) {
+  if (q && f !== "lib") {
     const safe = q.replace(/[,()%*]/g, " ").trim();
     if (safe) {
       const { data: lib } = await sb.from("condo_audio").select("*").or(`condo.ilike.%${safe}%,tts_text.ilike.%${safe}%${/^\d+$/.test(safe) ? `,condo_id.eq.${safe}` : ""}`).limit(50);
@@ -39,13 +39,26 @@ export default async function CondosPage({ searchParams }: { searchParams: SP })
   }
   const isHas = (x: any) => !!x.a?.path;
   const isErr = (x: any) => !x.a?.path && !!x.a?.tts_error;
-  const count = { all: all.length, has: all.filter(isHas).length, error: all.filter(isErr).length, missing: all.filter((x) => !isHas(x)).length };
-  const list = all
+  const count = { all: all.length, has: all.filter(isHas).length, error: all.filter(isErr).length, missing: all.filter((x) => !isHas(x)).length, lib: libTotal ?? 0 };
+
+  // แท็บ "คลังรวม": อ่านจากคลังทั้งหมดทีละหน้า (ไม่โหลดทั้งหมื่นแถว)
+  let libRows: any[] = [];
+  let libCount = 0;
+  if (f === "lib") {
+    const safe = q.replace(/[,()%*]/g, " ").trim();
+    let lq = sb.from("condo_audio").select("*", { count: "exact" }).order("condo_id", { ascending: true, nullsFirst: false }).range((page - 1) * PER, page * PER - 1);
+    if (safe) lq = lq.or(`condo.ilike.%${safe}%,tts_text.ilike.%${safe}%${/^\d+$/.test(safe) ? `,condo_id.eq.${safe}` : ""}`);
+    const { data, count: c } = await lq;
+    libRows = data ?? [];
+    libCount = c ?? 0;
+  }
+  const leadCount = new Map(all.map((x) => [x.a?.condo ?? x.condo, x.n]));
+  const list = f === "lib" ? libRows.map((a) => ({ key: `lib:${a.condo}`, condo: a.condo, condo_id: a.condo_id ?? null, n: leadCount.get(a.condo) ?? 0, a })) : all
     .filter((x) => (f === "has" ? isHas(x) : f === "missing" ? !isHas(x) : f === "error" ? isErr(x) : true))
     .filter((x) => !q || x.condo.toLowerCase().includes(q) || (x.condo_id ?? "").toLowerCase() === q || (x.a?.tts_text ?? "").toLowerCase().includes(q))
     .sort((a, b) => b.n - a.n || a.condo.localeCompare(b.condo, "th"));
-  const pages = Math.max(1, Math.ceil(list.length / PER));
-  const shown = list.slice((page - 1) * PER, page * PER);
+  const pages = Math.max(1, Math.ceil((f === "lib" ? libCount : list.length) / PER));
+  const shown = f === "lib" ? list : list.slice((page - 1) * PER, page * PER);
   const href = (o: Record<string, string | number>) => {
     const p = new URLSearchParams({ ...(f !== "all" ? { f } : {}), ...(q ? { q } : {}), ...Object.fromEntries(Object.entries(o).map(([k, v]) => [k, String(v)])) });
     for (const [k, v] of [...p.entries()]) if (!v || (k === "f" && v === "all") || (k === "page" && v === "1")) p.delete(k);
@@ -69,7 +82,7 @@ export default async function CondosPage({ searchParams }: { searchParams: SP })
         <div className="toolbar" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <nav className="segtabs" aria-label="กรองคอนโด">
             {TABS.map(([k, label]) => (
-              <Link key={k} href={href({ f: k, page: 1 })} className={f === k ? "on" : ""} aria-current={f === k ? "page" : undefined}>{label}<b>{count[k as keyof typeof count]}</b></Link>
+              <Link key={k} href={href({ f: k, page: 1 })} className={f === k ? "on" : ""} aria-current={f === k ? "page" : undefined}>{label}<b>{count[k as keyof typeof count].toLocaleString()}</b></Link>
             ))}
           </nav>
           <form action="/condos" style={{ display: "flex", gap: 8 }}>
