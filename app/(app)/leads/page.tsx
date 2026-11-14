@@ -8,6 +8,7 @@ import { Pill } from "@/components/Pill";
 import { CsvImport } from "@/components/CsvImport";
 import { SelectAll } from "@/components/SelectAll";
 import { PullButton } from "@/components/PullButton";
+import { SaveButton } from "@/components/SaveButton";
 import { addLead, queueLeads, pullNow } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -189,7 +190,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: SP }) 
             <div className="field"><label htmlFor="rent">ค่าเช่า/เดือน</label><input id="rent" name="rent" inputMode="numeric" /></div>
             <div className="field"><label htmlFor="customer_nationalities">สัญชาติลูกค้าที่สนใจ</label><input id="customer_nationalities" name="customer_nationalities" placeholder="อเมริกัน และ รัสเซีย" /></div>
             <div className="field"><label htmlFor="source">แหล่งที่มา</label><select id="source" name="source"><option>เพิ่มเอง</option><option>Livinginsider</option><option>DDproperty</option><option>Hipflat</option><option>กลุ่ม Facebook</option></select></div>
-            <div><button className="btn primary">เพิ่มเข้า{SEG_LABEL[seg]}</button></div>
+            <div><SaveButton className="btn primary" label={`เพิ่มเข้า${SEG_LABEL[seg]}`} done="เพิ่มลีดแล้ว" /></div>
           </form>
         </details>
         <p className="hint">CSV: <span className="mono">ชื่อเจ้าของ,เบอร์โทร,คอนโด,ห้อง,ค่าเช่า,สัญชาติลูกค้า</span> · นำเข้าตามแท็บที่เปิดอยู่ · เบอร์+คอนโดซ้ำจะถูกข้าม</p>

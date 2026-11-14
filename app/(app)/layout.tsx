@@ -1,4 +1,5 @@
 import { Nav } from "@/components/Nav";
+import { Toaster } from "@/components/Toast";
 import { signOut } from "../login/actions";
 import { createClient } from "@/lib/supabase/server";
 
@@ -24,6 +25,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
       </aside>
       <main className="main">{children}</main>
+      <Toaster />
     </div>
   );
 }

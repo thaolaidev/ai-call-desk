@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Top } from "@/components/Top";
+import { SaveButton } from "@/components/SaveButton";
 import { CopyButton } from "@/components/CopyButton";
 import { TestCallForm } from "@/components/TestCallForm";
 import { FIRST_MESSAGE, SYSTEM_PROMPT, ANALYSIS_SCHEMA, SUMMARY_PROMPT } from "@/lib/prompt";
@@ -60,14 +61,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   return (
     <>
       <Top title="ตั้งค่าระบบ" sub="ระบบโทร บทของเอเจนต์ และการเชื่อมต่อ" />
-      {(sp.err || sp.saved) && (
-        <div className="view" style={{ paddingBottom: 0 }}>
-          <p className={`banner ${sp.err ? "err" : ""}`} role="status">{sp.err ?? "บันทึกแล้ว"}</p>
-        </div>
-      )}
       <div className="view">
         <form className="card" action={updateCampaign} id="campaign">
-          <div className="card-h"><h2>ตั้งค่าการโทร</h2><button className="btn sm primary">บันทึก</button></div>
+          <div className="card-h"><h2>ตั้งค่าการโทร</h2><SaveButton /></div>
           <div className="card-b form-grid">
             {["new", "old"].map((seg) => (
               <div key={seg} className="field" style={{ gridColumn: "span 1" }}>
@@ -99,7 +95,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </form>
 
         <form className="card" action={updateSettings}>
-          <div className="card-h"><h2>ระบบโทรและข้อมูลในบท</h2><button className="btn sm primary">บันทึก</button></div>
+          <div className="card-h"><h2>ระบบโทรและข้อมูลในบท</h2><SaveButton /></div>
           <div className="card-b form-grid">
             <div className="field">
               <label htmlFor="provider">ระบบโทร</label>

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { STEPS, STEP_KEYS, yalecomName } from "@/lib/script";
 import { Top } from "@/components/Top";
 import { StepUpload } from "@/components/StepUpload";
+import { SaveButton } from "@/components/SaveButton";
 import { deleteStepAudio, savePlaylist } from "./actions";
 import { buildPlaybackList, loadPlaylist, WAIT_FILE } from "@/lib/playlist";
 
@@ -86,7 +87,7 @@ export default async function ScriptPage() {
             {missingOn.length > 0 && <p className="banner">ท่อนที่เปิดเล่นแต่ยังไม่มีไฟล์: {missingOn.join(", ")}</p>}
             <p className="hint">ลำดับที่จะส่งให้ Yalecom: <span className="mono">{preview.join(" → ").replaceAll(`${WAIT_FILE} → `, "·").replaceAll(WAIT_FILE, "·")}</span> (· = เงียบ 1 วินาที)</p>
             <p className="hint">ท่อน 04-1 / 04-2 (ราคา) ปิดไว้ก่อน จนกว่าจะมีเสียงราคาห้อง · ท่อน 06A และกฎ 07 เปิดได้ แต่จะเล่นทุกสาย เพราะระบบแยกทางตามคำตอบไม่ได้</p>
-            <div><button className="btn primary">บันทึกลำดับ</button></div>
+            <div><SaveButton label="บันทึกลำดับ" className="btn primary" /></div>
           </div>
         </form>
 

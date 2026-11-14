@@ -8,6 +8,7 @@ import { Top } from "@/components/Top";
 import { AudioUpload } from "@/components/AudioUpload";
 import { CopyButton } from "@/components/CopyButton";
 import { PullButton } from "@/components/PullButton";
+import { SaveButton } from "@/components/SaveButton";
 import { fillMissing, regenCondo, saveCondo, uploadCondoFile } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -87,8 +88,8 @@ export default async function CondosPage({ searchParams }: { searchParams: SP })
                         <form action={saveCondo} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                           {Object.entries(fields).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
                           <input name="tts_text" defaultValue={a?.tts_text ?? ""} placeholder={defaultReading(condo)} aria-label={`คำอ่าน ${condo}`} style={{ flex: "1 1 200px", padding: "6px 8px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--surface)" }} />
-                          <button className="btn sm">บันทึก</button>
-                          {botnoiReady() && <button className="btn sm" formAction={regenCondo}>{a?.path ? "อ่านใหม่" : "สร้างเสียง"}</button>}
+                          <SaveButton className="btn sm" />
+                          {botnoiReady() && <SaveButton className="btn sm" formAction={regenCondo} label={a?.path ? "อ่านใหม่" : "สร้างเสียง"} done="สร้างเสียงแล้ว" />}
                           <label className="toggle small" title="ส่งไฟล์เข้า Yalecom แล้ว"><input type="checkbox" name="ready" defaultChecked={!!a?.ready} />อยู่ใน Yalecom</label>
                         </form>
                       </td>
