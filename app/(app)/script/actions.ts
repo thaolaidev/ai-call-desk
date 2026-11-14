@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { STEPS } from "@/lib/script";
 
 const MAX_BYTES = 4 * 1024 * 1024;
+const MAX_DIRECT = 25 * 1024 * 1024;
 const BUCKET = "script-audio";
 
 export async function uploadStepAudio(_: string | null, formData: FormData): Promise<string> {
@@ -63,4 +64,38 @@ export async function savePlaylist(formData: FormData) {
   }));
   await sb.from("script_playlist").upsert(rows);
   revalidatePath("/script");
+}
+
+/**
+ * อัปโหลดตรงจากเบราว์เซอร์ไป Storage (ไม่ผ่านเซิร์ฟเวอร์เว็บ → ไฟล์ใหญ่ได้ถึง 25 MB, ไม่ติดลิมิต 4.5 MB ของ Vercel)
+ * ขั้น 1: ขอลิงก์อัปโหลด · ขั้น 2: เบราว์เซอร์ PUT ไฟล์ · ขั้น 3: finishStepUpload บันทึกลงตาราง
+ */
+export async function prepareStepUpload(step: string, fileName: string, size: number): Promise<{ error?: string; path?: string; url?: string }> {
+  if (!STEPS[step]) return { error: "ไม่พบท่อนนี้" };
+  if (!size) return { error: "ไฟล์ว่าง" };
+  if (size > MAX_DIRECT) return { error: "ไฟล์ใหญ่เกิน 25 MB · แนะนำส่งออกจาก Botnoi เป็น mp3" };
+  if (!/\.(mp3|wav|m4a|ogg|aac|flac)$/i.test(fileName)) return { error: "รองรับเฉพาะไฟล์เสียง mp3 / wav / m4a / ogg" };
+  const sb = await createClient();
+  const { data: team } = await sb.from("settings").select("id").eq("id", 1).maybeSingle();
+  if (!team) return { error: "ไม่มีสิทธิ์ (อีเมลไม่อยู่ในทีม)" };
+  const ext = (fileName.match(/\.(\w+)$/)?.[1] ?? "mp3").toLowerCase();
+  const path = `new/${step}-${Date.now()}.${ext}`;
+  const { data, error } = await createAdminClient().storage.from(BUCKET).createSignedUploadUrl(path);
+  if (error || !data) return { error: `ขอลิงก์อัปโหลดไม่ได้: ${error?.message ?? "-"}` };
+  return { path, url: data.signedUrl };
+}
+
+export async function finishStepUpload(step: string, path: string, fileName: string, size: number): Promise<string> {
+  if (!STEPS[step] || !path.startsWith(`new/${step}-`)) return "ข้อมูลไม่ถูกต้อง";
+  const sb = await createClient();
+  const { data: auth } = await sb.auth.getUser();
+  const { data: old, error: tblErr } = await sb.from("script_audio").select("path").eq("step_key", step).maybeSingle();
+  if (tblErr) return "ยังไม่ได้รัน update_0008-0013.sql ใน Supabase";
+  const { error } = await sb.from("script_audio").upsert({
+    step_key: step, path, file_name: fileName, size_bytes: size, uploaded_at: new Date().toISOString(), uploaded_by: auth.user?.email ?? null,
+  });
+  if (error) return `บันทึกไม่สำเร็จ: ${error.message}`;
+  if (old?.path && old.path !== path) await createAdminClient().storage.from(BUCKET).remove([old.path]);
+  revalidatePath("/script");
+  return "อัปโหลดแล้ว";
 }

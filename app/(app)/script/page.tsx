@@ -2,8 +2,8 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { STEPS, STEP_KEYS, yalecomName } from "@/lib/script";
 import { Top } from "@/components/Top";
-import { AudioUpload } from "@/components/AudioUpload";
-import { deleteStepAudio, savePlaylist, uploadStepAudio } from "./actions";
+import { StepUpload } from "@/components/StepUpload";
+import { deleteStepAudio, savePlaylist } from "./actions";
 import { buildPlaybackList, loadPlaylist, WAIT_FILE } from "@/lib/playlist";
 
 export const dynamic = "force-dynamic";
@@ -40,7 +40,7 @@ export default async function ScriptPage() {
         <p className="step-txt">“{s.text}”</p>
         {r && <audio controls preload="none" src={urlOf(r)} />}
         <div className="step-f">
-          <AudioUpload action={uploadStepAudio} fields={{ step: k }} has={!!r} />
+          <StepUpload step={k} has={!!r} />
           {r && (
             <>
               <a className="small" href={dlOf(k, r)}>ดาวน์โหลด ({yalecomName(k)})</a>
