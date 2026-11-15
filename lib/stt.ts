@@ -28,6 +28,7 @@ export type CallDetails = {
   price_confirmed: boolean | null;    // ยืนยันราคาเดิม
   owner_price: number | null;         // ราคาที่เจ้าของบอก ถ้าไม่ตรงกับเดิม
   accepts_foreigners: boolean | null; // รับลูกค้าต่างชาติไหม
+  owner_agreed_profile: boolean | null; // ยอมให้แอดมินส่งโปรไฟล์ลูกค้าไหม
 };
 
 /** ตัดส่วนที่เป็นเสียงอัดของเราออก เหลือเฉพาะคำตอบของเจ้าของ (เสียงอัดจบด้วย "ได้เลยค่ะ") */
@@ -103,13 +104,14 @@ export async function analyzeWithGemini(audio: ArrayBuffer): Promise<(Classified
   const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
   const prompt =
     "นี่คือไฟล์เสียงโทรศัพท์ภาษาไทย ระหว่างเสียงอัด (บอท) ของบริษัทเท่าไหร่ดอทคอม กับเจ้าของห้องคอนโด\n" +
-    "บอทเล่นคำถามต่อกันทั้งชุด เว้นช่วงสั้นๆ ให้เจ้าของตอบ: ห้องยังว่างไหม → พร้อมเข้าอยู่เลยไหม → ว่างวันที่/เดือนไหน → (ราคาห้องใช่ไหม) → รับลูกค้าต่างชาติไหม → แจ้งว่าแอดมินจะส่งโปรไฟล์ลูกค้า\n" +
-    "บอทถามต่อจนจบแม้เจ้าของตอบว่าไม่ว่างแล้ว ให้ยึดคำตอบของเจ้าของเป็นหลัก เจ้าของอาจตอบช้า ตอบข้ามข้อ หรือพูดแทรกเสียงบอท ให้จับคู่คำตอบกับคำถามตามความหมาย\n" +
+    "ลำดับบทโทร: ห้องยังว่างไหม (ไม่ว่าง → ขอบคุณแล้ววางสาย) → พร้อมเข้าอยู่เลยไหม → ว่างวันที่/เดือนไหน → (ราคาห้องใช่ไหม) → รับลูกค้าต่างชาติไหม → รับ: (ถ้าเจ้าของถามชาติ บอทบอกสัญชาติ) ขอบคุณ แอดมินจะส่งโปรไฟล์ · ไม่รับ: บอทอธิบายกฎตรวจห้อง แล้วถามว่าให้แอดมินส่งโปรไฟล์ลูกค้าให้พิจารณาก่อนดีไหม\n" +
+    "outcome ให้ยึดคำตอบของเจ้าของต่อคำถาม \"ยังว่างอยู่ไหม\" เป็นหลัก ถ้าเจ้าของตอบว่าไม่ว่าง ให้ outcome = not_avail แม้บอทจะถามข้ออื่นต่อ และ outcome ต้องตรงกับ summary_th\n" +
+    "ให้ยึดคำตอบของเจ้าของเป็นหลัก เจ้าของอาจตอบช้า ตอบข้ามข้อ หรือพูดแทรกเสียงบอท ให้จับคู่คำตอบกับคำถามตามความหมาย\n" +
     "1) ถอดเสียงทั้งไฟล์เป็นข้อความ\n2) แยกเฉพาะคำพูดของเจ้าของห้อง (ไม่รวมเสียงบอท)\n" +
     "3) จัดผล outcome: avail = ห้องยังว่าง · not_avail = ไม่ว่าง/มีคนเช่า/ขายแล้ว · callback = ขอให้โทรมาใหม่ · dnc = ขอไม่ให้ติดต่อ/ไม่ฝากเอเจนต์ · wrong_number = ไม่ใช่เจ้าของ · unclear = ไม่ตอบหรือฟังไม่ออก\n" +
-    "4) รายละเอียด (ไม่ได้ตอบให้ null): ready_now = พร้อมเข้าอยู่เลยไหม · available_from = วันที่/เดือนที่ว่างตามที่เจ้าของพูด · price_confirmed = ยืนยันราคาที่บอทพูด · owner_price = ราคาที่เจ้าของบอกถ้าไม่ตรง (ตัวเลขบาท) · accepts_foreigners = รับต่างชาติไหม · current_lease_until = ผู้เช่าปัจจุบันอยู่ถึงเมื่อไหร่\n" +
+    "4) รายละเอียด (ไม่ได้ตอบให้ null): ready_now = พร้อมเข้าอยู่เลยไหม · available_from = วันที่/เดือนที่ว่างตามที่เจ้าของพูด · price_confirmed = ยืนยันราคาที่บอทพูด · owner_price = ราคาที่เจ้าของบอกถ้าไม่ตรง (ตัวเลขบาท) · accepts_foreigners = รับต่างชาติไหม · owner_agreed_profile = เจ้าของยอมให้ส่งโปรไฟล์ลูกค้าไหม · current_lease_until = ผู้เช่าปัจจุบันอยู่ถึงเมื่อไหร่\n" +
     "ห้ามนับคำในเสียงบอท ห้ามเดา\n" +
-    'ตอบเป็น JSON เท่านั้น: {"transcript": string, "owner_answer": string, "outcome": "avail|not_avail|callback|dnc|wrong_number|unclear", "ready_now": boolean|null, "available_from": string|null, "price_confirmed": boolean|null, "owner_price": number|null, "accepts_foreigners": boolean|null, "current_lease_until": string|null, "summary_th": string}';
+    'ตอบเป็น JSON เท่านั้น: {"transcript": string, "owner_answer": string, "outcome": "avail|not_avail|callback|dnc|wrong_number|unclear", "ready_now": boolean|null, "available_from": string|null, "price_confirmed": boolean|null, "owner_price": number|null, "accepts_foreigners": boolean|null, "owner_agreed_profile": boolean|null, "current_lease_until": string|null, "summary_th": string}';
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": key },
@@ -131,6 +133,7 @@ export async function analyzeWithGemini(audio: ArrayBuffer): Promise<(Classified
     price_confirmed: bool(j.price_confirmed),
     owner_price: Number.isFinite(Number(j.owner_price)) && j.owner_price != null ? Number(j.owner_price) : null,
     accepts_foreigners: bool(j.accepts_foreigners),
+    owner_agreed_profile: bool(j.owner_agreed_profile),
   };
   let outcome: Outcome = allowed.includes(j.outcome) ? (j.outcome as Outcome) : "unclear";
   // ว่าง + รู้ว่ารับต่างชาติหรือไม่ → แยกผลให้ละเอียดขึ้น

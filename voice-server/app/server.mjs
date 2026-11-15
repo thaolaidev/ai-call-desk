@@ -32,7 +32,11 @@ const CFG = {
   listenSilence: Number(env("LISTEN_SILENCE_SEC", 1)),
 };
 const APP = "thaolai";
-const ANSWER_SILENCE_SEC = 3; // กำหนดตายตัว ไม่ต้องตั้งในหน้าเว็บ
+const ANSWER_SILENCE_SEC = 1; // เจ้าของเงียบ 1 วินาที = ตอบจบ (พูดต่อหลังเว้นจังหวะ ระบบอัดต่อให้)
+const ANSWER_MAX_SEC = 30; // เจ้าของพูดยาวได้สูงสุดต่อคำตอบ
+const TALK_QUIET_MS = 1000; // ตรวจจับเสียงพูด: เงียบ 1 วินาที = หยุดพูดแล้ว
+const NO_ANSWER_MS = 2000; // ถามแล้วเจ้าของไม่เริ่มพูดภายใน 2 วินาที = ไม่ตอบ → ถามซ้ำ
+const WAIT_QUIET_MAX_MS = 15_000; // ก่อนบอทพูด รอให้เจ้าของพูดจบ (นานสุด 15 วินาที)
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 mkdirSync(CFG.sounds, { recursive: true });
 
@@ -99,7 +103,17 @@ async function onEvent(e) {
   const s = chId ? sessions.get(chId) : null;
   switch (e.type) {
     case "StasisStart":
-      if (s && !s.started) { s.started = true; s.answered = true; s.answeredAt = Date.now(); runFlow(s).catch((err) => { log(s.callId, "flow error", err.message); hangup(s); }); }
+      if (s && !s.started) {
+        s.started = true;
+        // เปิดตรวจจับเสียงพูดของเจ้าของ → บอทจะไม่พูดแทรกระหว่างที่เจ้าของยังพูดอยู่
+        await ari("POST", `/channels/${s.id}/variable`, { variable: "TALK_DETECT(set)", value: `${TALK_QUIET_MS},256` }).then(() => { s.talkDetect = true; }).catch((err) => log(s.callId, "talk detect off", err.message));
+        s.answered = true; s.answeredAt = Date.now(); runFlow(s).catch((err) => { log(s.callId, "flow error", err.message); hangup(s); }); }
+      break;
+    case "ChannelTalkingStarted":
+      if (s) { s.talking = true; s.talkStartAt = Date.now(); }
+      break;
+    case "ChannelTalkingFinished":
+      if (s) { s.talking = false; release(`quiet:${s.id}`); }
       break;
     case "ChannelStateChange":
       if (s && e.channel.state === "Up" && !s.answered) { s.answered = true; s.answeredAt = Date.now(); }
@@ -150,8 +164,17 @@ async function prepare(url) {
   return `${CFG.sounds}/${name}`; // path เต็ม (Asterisk รับ sound:/path/file โดยไม่ต้องใส่นามสกุล)
 }
 
+/** ถ้าเจ้าของยังพูดอยู่ รอจนพูดจบก่อน (กันบอทพูดแทรก) */
+async function waitQuiet(s, maxMs = WAIT_QUIET_MAX_MS) {
+  if (!s.talking || s.gone) return;
+  log(s.callId, "owner still talking, waiting");
+  await wait(s, `quiet:${s.id}`, maxMs);
+}
+
 async function play(s, sound) {
   if (!sound || s.gone) return;
+  await waitQuiet(s);
+  if (s.gone) return;
   const id = randomUUID();
   const done = wait(s, `playback:${id}`, 180_000);
   try { await ari("POST", `/channels/${s.id}/play/${id}`, { media: `sound:${sound}` }); }
@@ -160,18 +183,44 @@ async function play(s, sound) {
 }
 
 /** อัดคำตอบสั้นๆ ของเจ้าของ (หยุดเมื่อเงียบ) แล้วให้ Gemini ตีความ */
+/** อัดเสียง 1 ช่วง หยุดเมื่อเจ้าของเงียบตามที่กำหนด */
+async function recordOnce(s, name, silenceSec, noAnswerMs = 0) {
+  const done = wait(s, `recording:${name}`, (ANSWER_MAX_SEC + 5) * 1000);
+  const t0 = Date.now();
+  // เจ้าของยังไม่เริ่มพูดภายในเวลาที่กำหนด → หยุดอัด (ถือว่าไม่ตอบ) · ใช้ได้เมื่อเปิดตรวจจับเสียงพูดสำเร็จ
+  const cut = noAnswerMs && s.talkDetect
+    ? setTimeout(() => { if (!s.talking && !(s.talkStartAt > t0)) { s.noAnswer = name; ari("POST", `/recordings/live/${name}/stop`).catch(() => {}); } }, noAnswerMs)
+    : null;
+  try {
+    await ari("POST", `/channels/${s.id}/record`, {
+      name, format: "wav", maxDurationSeconds: ANSWER_MAX_SEC, maxSilenceSeconds: Math.max(1, Math.round(silenceSec ?? CFG.listenSilence)), ifExists: "overwrite", beep: "false", terminateOn: "none",
+    });
+  } catch (err) { release(`recording:${name}`); if (s.gone) return null; throw err; }
+  const r = await done;
+  if (cut) clearTimeout(cut);
+  if (r.hangup || s.gone) return null;
+  return `${CFG.recDir}/${name}.wav`;
+}
+
 async function listen(s, kind, question, silenceSec) {
   if (s.gone) return { intent: "hangup" };
   const name = `ans-${s.callId}-${++s.turn}`;
-  const done = wait(s, `recording:${name}`, (CFG.listenMax + 5) * 1000);
-  try {
-    await ari("POST", `/channels/${s.id}/record`, {
-      name, format: "wav", maxDurationSeconds: Math.max(CFG.listenMax, (silenceSec ?? 0) + 7), maxSilenceSeconds: Math.max(1, Math.round(silenceSec ?? CFG.listenSilence)), ifExists: "overwrite", beep: "false", terminateOn: "none",
-    });
-  } catch (err) { release(`recording:${name}`); if (s.gone) return { intent: "hangup" }; throw err; }
-  const r = await done;
-  if (r.hangup || s.gone) return { intent: "hangup" };
-  const file = `${CFG.recDir}/${name}.wav`;
+  const first = await recordOnce(s, name, silenceSec, NO_ANSWER_MS);
+  if (!first) return { intent: "hangup" };
+  if (s.noAnswer === name) return log(s.callId, kind, "no answer"), { intent: "silent", text: "" };
+  // เจ้าของเว้นจังหวะแล้วพูดต่อ → อัดต่ออีกช่วง แล้วรวมเป็นคำตอบเดียว (สูงสุด 3 ช่วง)
+  const parts = [first];
+  for (let i = 1; i <= 2 && s.talking && !s.gone; i++) {
+    log(s.callId, kind, "owner continued, recording more");
+    const more = await recordOnce(s, `${name}-c${i}`, silenceSec);
+    if (!more) return { intent: "hangup" };
+    parts.push(more);
+  }
+  let file = first;
+  if (parts.length > 1) {
+    file = `${CFG.recDir}/${name}-all.wav`;
+    await run("ffmpeg", ["-loglevel", "error", "-y", ...parts.flatMap((f) => ["-i", f]), "-filter_complex", `concat=n=${parts.length}:v=0:a=1`, "-ar", "8000", "-ac", "1", file]).catch(() => { file = first; });
+  }
   const size = await stat(file).then((x) => x.size).catch(() => 0);
   if (size < 8000) return log(s.callId, kind, "silence"), { intent: "silent", text: "" }; // < ~0.5 วินาที
   // เล่นเสียงรับคำสั้นๆ (เช่น "ค่ะ") ระหว่างรอ AI ตีความ → ไม่เงียบนาน
@@ -188,15 +237,29 @@ const KINDS = {
   date: 'ว่างวันที่เท่าไหร่ → intent: "answered" | "unclear" · available_from = วันที่ตามที่เจ้าของพูด',
   month: 'เดือนไหน → intent: "answered" | "unclear" · available_from = เดือนตามที่เจ้าของพูด',
   price: 'ราคาห้องตามที่บอทพูดถูกไหม → intent: "yes" | "no" | "unclear" · ถ้าเจ้าของบอกราคาใหม่ ใส่ owner_price (ตัวเลขบาท)',
-  foreign: 'เจ้าของรับลูกค้าต่างชาติไหม → intent: "yes" | "no" | "unclear" · asks_nationality = true ถ้าเจ้าของถามกลับว่าลูกค้าชาติไหน',
+  foreign: 'เจ้าของรับลูกค้าต่างชาติไหม → intent: "yes" | "no" | "unclear" · asks_nationality = true ถ้าเจ้าของถามกลับว่าผู้เช่า/ลูกค้าชาติไหน',
+  rules: 'บอทเพิ่งอธิบายกฎตรวจห้องของบริษัท เจ้าของเปลี่ยนใจรับลูกค้าต่างชาติไหม → intent: "yes" (โอเค/รับได้/ถ้าแบบนี้รับ) | "no" (ยังไม่รับ/รับแต่คนไทย) | "unclear" (แค่รับฟัง เช่น ค่ะ ครับ อืม)',
+  profile: 'ให้แอดมินส่งโปรไฟล์ลูกค้าให้พิจารณาก่อนดีไหม → intent: "yes" (ได้/ส่งมาได้/ลองดู) | "no" (ไม่ต้อง/ไม่รับ/ไม่สนใจ) | "unclear"',
 };
+
+/** ตรวจ intent กับข้อความที่ถอดได้ ถ้าข้อความมีคำปฏิเสธชัดเจนแต่ intent เป็น yes → แก้เป็น no */
+const NEG = {
+  avail: /ไม่ว่าง|ไม่ได้ว่าง|ไม่ค่อยว่าง|มีคน(เช่า|อยู่|จอง)|เช่า(ไป)?แล้ว|ขาย(ไป)?แล้ว|ปล่อย(ไป)?แล้ว|ไม่มีห้อง|ไม่เหลือ|ติดผู้เช่า|ไม่ปล่อย/,
+  foreign: /ไม่รับ|ไม่เอา(ต่างชาติ|ฝรั่ง)?|เฉพาะคนไทย|คนไทยเท่านั้น|รับแต่คนไทย/,
+  profile: /ไม่ต้อง|ไม่สะดวก|ไม่สนใจ|ไม่เอา/,
+};
+function checkText(kind, text, intent) {
+  const re = NEG[kind];
+  if (!re || intent !== "yes") return intent;
+  return re.test(text.replace(/\s+/g, "")) ? "no" : intent;
+}
 
 const noThinking = new Set(); // รุ่นที่ไม่รับการตั้งระดับคิด
 async function understand(kind, question, wav) {
   if (!CFG.geminiKey) return { intent: "unclear", text: "", error: "no GEMINI_API_KEY" };
   const prompt =
     `เสียงนี้คือคำตอบของเจ้าของห้องคอนโด (ภาษาไทย ทางโทรศัพท์) ต่อคำถาม "${question}"\n` +
-    `${KINDS[kind]}\nห้ามเดา ถ้าฟังไม่ออกให้ unclear\n` +
+    `${KINDS[kind]}\nขั้นตอน: ถอดคำพูดของเจ้าของเป็นข้อความ (text) ให้ตรงทุกคำก่อน แล้วตัดสิน intent จาก text นั้น intent ต้องไม่ขัดกับ text · ห้ามเดา ถ้าฟังไม่ออกให้ unclear\n` +
     'ตอบ JSON เท่านั้น: {"text": string, "intent": string, "confidence": number (0-1), "available_from": string|null, "owner_price": number|null, "asks_nationality": boolean}';
   try {
     const model = kind === "avail" ? CFG.geminiModelKey : CFG.geminiModel;
@@ -223,7 +286,10 @@ async function understand(kind, question, wav) {
     const j = JSON.parse(t.replace(/^```json\s*|\s*```$/g, ""));
     // ไม่มั่นใจ → ถือว่าฟังไม่ชัด ให้ถามซ้ำ
     const conf = Number(j.confidence);
-    const intent = Number.isFinite(conf) && conf < 0.7 ? "unclear" : String(j.intent ?? "unclear");
+    let intent = Number.isFinite(conf) && conf < 0.7 ? "unclear" : String(j.intent ?? "unclear");
+    // กันผลขัดกันเอง: ข้อความที่ถอดได้บอกว่า "ไม่ว่าง/ไม่รับ" แต่ intent ออกมาเป็น yes → เชื่อข้อความ
+    const fixed = checkText(kind, String(j.text ?? ""), intent);
+    if (fixed !== intent) { log("intent fixed by text", kind, intent, "→", fixed, JSON.stringify(j.text)); intent = fixed; }
     return { intent, confidence: Number.isFinite(conf) ? conf : null, heard: String(j.intent ?? ""), text: String(j.text ?? ""), available_from: j.available_from ?? null, owner_price: j.owner_price ?? null, asks_nationality: !!j.asks_nationality };
   } catch (err) {
     return { intent: "unclear", text: "", error: err.message };
@@ -233,16 +299,21 @@ async function understand(kind, question, wav) {
 // ---------- บทโทร (แยกทางตามคำตอบ) ----------
 async function runFlow(s) {
   const P = (k) => (s.on(k) ? play(s, s.snd[k]) : null);
-  const L = (kind, _step, q) => listen(s, kind, q, ANSWER_SILENCE_SEC); // เจ้าของเงียบ 3 วินาที = ตอบจบ
+  const L = (kind, _step, q) => listen(s, kind, q, ANSWER_SILENCE_SEC); // เจ้าของเงียบ 1 วินาที = ตอบจบ
   const Q = (k) => s.title[k] ?? k;
-  const live = (s.live = { outcome: "unclear", ready_now: null, available_from: null, price_confirmed: null, owner_price: null, accepts_foreigners: null });
+  /** ถามแล้วรอคำตอบ · เจ้าของไม่ตอบ (เงียบ 2 วินาที) → ถามซ้ำ 1 ครั้ง · retryUnclear = ฟังไม่ออกก็ถามซ้ำ */
+  const ask = async (kind, q, say, retryUnclear = false) => {
+    await say();
+    let a = await L(kind, null, q);
+    if (!s.gone && (a.intent === "silent" || (retryUnclear && a.intent === "unclear"))) { await say(); a = await L(kind, null, `${q} (ถามซ้ำ)`); }
+    return a;
+  };
+  const live = (s.live = { outcome: "unclear", ready_now: null, available_from: null, price_confirmed: null, owner_price: null, accepts_foreigners: null, owner_agreed_profile: null, nationality_told: null, accepted_after_rules: null });
 
   await P("01");
   await P("02-1");
   if (s.snd.condo) await play(s, s.snd.condo);
-  await P("02-2");
-  let a = await L("avail", "02-2", "ห้องยังว่างอยู่ไหม");
-  if (["silent", "unclear"].includes(a.intent) && !s.gone) { await P("02-2"); a = await L("avail", "02-2", "ห้องยังว่างอยู่ไหม (ถามซ้ำ)"); }
+  const a = await ask("avail", "ห้องยังว่างอยู่ไหม", () => P("02-2"), true);
   if (a.intent === "hangup" || s.gone) return;
 
   const map = { no: "not_avail", callback: "callback", dnc: "dnc", wrong: "wrong_number" };
@@ -256,41 +327,67 @@ async function runFlow(s) {
 
   // สอบถามรายละเอียด
   if (s.on("03")) {
-    await P("03");
-    const r = await L("ready", "03", Q("03"));
+    const r = await ask("ready", Q("03"), () => P("03"));
     if (r.intent === "yes") live.ready_now = true;
     if (r.intent === "no") live.ready_now = false;
     if (r.available_from) live.available_from = r.available_from;
     if (r.intent !== "yes" && !live.available_from && !s.gone) {
-      if (s.on("03-1")) { await P("03-1"); const d = await L("date", "03-1", Q("03-1")); if (d.available_from) live.available_from = d.available_from; }
-      if (s.on("03-2")) { await P("03-2"); const m = await L("month", "03-2", Q("03-2")); if (m.available_from) live.available_from = [live.available_from, m.available_from].filter(Boolean).join(" "); }
+      if (s.on("03-1")) { const d = await ask("date", Q("03-1"), () => P("03-1")); if (d.available_from) live.available_from = d.available_from; }
+      if (s.on("03-2")) { const m = await ask("month", Q("03-2"), () => P("03-2")); if (m.available_from) live.available_from = [live.available_from, m.available_from].filter(Boolean).join(" "); }
     }
   }
   if (s.snd.price && s.on("04-1")) {
-    await P("04-1"); await play(s, s.snd.price); await P("04-2");
-    const p = await L("price", "04-2", "ราคาห้องปัจจุบันใช่ไหม");
+    const p = await ask("price", "ราคาห้องปัจจุบันใช่ไหม", async () => { await P("04-1"); await play(s, s.snd.price); await P("04-2"); });
     if (p.intent === "yes") live.price_confirmed = true;
     if (p.intent === "no") live.price_confirmed = false;
     if (p.owner_price) live.owner_price = Number(p.owner_price) || null;
   }
 
   // ต่างชาติ
+  const snd = (k) => s.snd[k] ?? null; // ท่อนสัญชาติ/อธิบายกฎ: เล่นเมื่อมีไฟล์เสียง
+  const bye = () => (s.on("09") ? P("09") : P("02B")); // "ขอบคุณค่ะ" (ไม่มีไฟล์ 09 → ใช้ 02B)
+  let f = { intent: "unclear" };
   if (s.on("05")) {
-    await P("05");
-    let f = await L("foreign", "05", Q("05"));
-    if (["silent", "unclear"].includes(f.intent) && !s.gone) { await P("05"); f = await L("foreign", "05", `${Q("05")} (ถามซ้ำ)`); }
-    if (f.intent === "yes") {
-      live.accepts_foreigners = true;
-      if (f.asks_nationality && s.snd["06A"]) { await play(s, s.snd["06A"]); }
-    } else if (f.intent === "no") {
-      live.accepts_foreigners = false;
-      for (const k of ["07-1", "07-2", "07-3", "07-4"]) await play(s, s.snd[k]); // อธิบายกฎเสมอเมื่อไม่รับ
-    }
+    f = await ask("foreign", Q("05"), () => P("05"), true);
   }
-  live.outcome = live.accepts_foreigners === true ? "avail_ok" : live.accepts_foreigners === false ? "avail_no" : "avail";
+  if (f.intent === "hangup" || s.gone) return;
+  if (f.intent === "yes") {
+    live.accepts_foreigners = true;
+    live.outcome = "avail_ok";
+    // เจ้าของถามว่าผู้เช่าชาติไหน → บอกสัญชาติ (มีทั้งชุด A และ B สุ่มเลือก 1 ชุด)
+    if (f.asks_nationality) {
+      const opts = ["06A", "06B"].filter((k) => snd(k));
+      const pick = opts[Math.floor(Math.random() * opts.length)];
+      if (pick) { live.nationality_told = Q(pick); log(s.callId, "nationality", pick); await play(s, s.snd[pick]); }
+    }
+    // "ขอบคุณค่ะ เดี๋ยวแอดมินจะส่งโปรไฟล์ลูกค้าให้พิจารณาค่ะ"
+    if (s.on("09A")) await P("09A");
+    else { await P("08"); await bye(); }
+    live.owner_agreed_profile = true;
+    return hangup(s);
+  }
 
-  await P("08");
-  await P("09");
+  if (f.intent === "no") {
+    live.accepts_foreigners = false;
+    live.outcome = "avail_no";
+    for (const k of ["07-1", "07-2", "07-3", "07-4"]) if (snd(k)) await play(s, s.snd[k]); // อธิบายกฎเมื่อไม่รับ
+    if (s.gone) return;
+    // "ยังไงให้ทางแอดมินเราส่งโปรไฟล์ลูกค้าให้พิจารณาดูก่อนดีไหมคะ"
+    if (s.on("07-5")) {
+      const g = await ask("profile", Q("07-5"), () => P("07-5")); // ฟังคำตอบ แล้วตอบรับ "รับทราบค่ะ"
+      if (g.intent === "hangup" || s.gone) return;
+      if (g.intent === "yes") live.owner_agreed_profile = true;
+      if (g.intent === "no") live.owner_agreed_profile = false;
+    }
+    await P("08"); // "เดี๋ยวแอดมินจะส่งโปรไฟล์ลูกค้าให้พิจารณานะคะ"
+    await bye(); // "ขอบคุณค่ะ"
+    return hangup(s);
+  }
+
+  // ไม่ได้ถาม/ฟังไม่ออกเรื่องต่างชาติ → ปิดสายแบบรับต่างชาติ
+  live.outcome = "avail";
+  if (s.on("09A")) await P("09A");
+  else { await P("08"); await bye(); }
   return hangup(s);
 }
 
@@ -339,7 +436,7 @@ async function finish(s) {
     await new Promise((r) => setTimeout(r, [2000, 10_000, 30_000][i] ?? 60_000));
   }
   // ลบไฟล์ชั่วคราว (เก็บไฟล์เต็มไว้ที่เว็บแล้ว)
-  for (let n = 1; n <= s.turn; n++) await unlink(`${CFG.recDir}/ans-${s.callId}-${n}.wav`).catch(() => {});
+  for (let n = 1; n <= s.turn; n++) for (const x of ["", "-c1", "-c2", "-all"]) await unlink(`${CFG.recDir}/ans-${s.callId}-${n}${x}.wav`).catch(() => {});
   if (mp3) await unlink(`${CFG.recDir}/full-${s.callId}.wav`).catch(() => {});
 }
 

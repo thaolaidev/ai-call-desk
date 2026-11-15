@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { STEPS, STEP_KEYS, yalecomName } from "@/lib/script";
+import { CHANGED_AT, STEPS, STEP_KEYS, yalecomName } from "@/lib/script";
 import { Top } from "@/components/Top";
 import { StepUpload } from "@/components/StepUpload";
 import { SaveButton } from "@/components/SaveButton";
@@ -35,7 +35,9 @@ export default async function ScriptPage() {
         <div className="step-h">
           <span className="step-no">{s.key}</span>
           <b>{s.title}</b>
-          <span className={`pill ${r ? "t-ok" : "t-wa"}`}>{r ? "มีไฟล์แล้ว" : "ยังไม่มีไฟล์"}</span>
+          {r && CHANGED_AT[k] && Date.parse(r.uploaded_at) < Date.parse(CHANGED_AT[k])
+            ? <span className="pill t-wa">บทเปลี่ยน · อัดใหม่</span>
+            : <span className={`pill ${r ? "t-ok" : "t-wa"}`}>{r ? "มีไฟล์แล้ว" : "ยังไม่มีไฟล์"}</span>}
         </div>
         <p className="step-txt">“{s.text}”</p>
         {r && <audio controls preload="none" src={urlOf(r)} />}
@@ -90,7 +92,7 @@ export default async function ScriptPage() {
         </form>
 
         <div className="flow">
-          <div className="or">เสียงรับคำ เล่นทันทีหลังเจ้าของตอบจบ ระหว่างรอ AI ตีความ ช่วยให้สายไม่เงียบ (ไม่ใส่ก็ได้)</div>
+          <div className="or">“รับทราบค่ะ” เล่นทันทีหลังเจ้าของตอบจบทุกคำถาม ระหว่างรอ AI ตีความคำตอบ</div>
           <Card k="ack" />
           <div className="end">เริ่มบทโทร</div>
           <Card k="01" />
@@ -130,19 +132,24 @@ export default async function ScriptPage() {
               <div className="branches inner">
                 <section className="branch">
                   <Fork label="รับต่างชาติ" />
-                  <div className="or">ตอบเฉพาะเมื่อเจ้าของถามว่า “ผู้เช่าชาติไหน”</div>
+                  <div className="or">บอกสัญชาติเฉพาะเมื่อเจ้าของถามว่า “ผู้เช่าชาติไหน” · สุ่ม A หรือ B</div>
                   <Card k="06A" />
+                  <Card k="06B" />
+                  <Down />
+                  <Card k="09A" />
+                  <div className="end">จบสาย · ผล: ว่าง รับต่างชาติ</div>
                 </section>
                 <section className="branch">
-                  <Fork label="ไม่รับต่างชาติ · อธิบายกฎ 2 ข้อ" />
-                  <Card k="07-1" /><Down /><Card k="07-2" /><Down /><Card k="07-3" /><Down /><Card k="07-4" />
+                  <Fork label="ไม่รับต่างชาติ · อธิบายกฎ" />
+                  <Card k="07-1" /><Down /><Card k="07-2" /><Down /><Card k="07-3" /><Down /><Card k="07-4" /><Down />
+                  <Card k="07-5" />
+                  <div className="or">รอเจ้าของตอบ → “รับทราบค่ะ”</div>
+                  <Card k="08" />
+                  <Down />
+                  <Card k="09" />
+                  <div className="end">จบสาย · ผล: ว่าง ไม่รับต่างชาติ</div>
                 </section>
               </div>
-              <Down />
-              <Card k="08" />
-              <Down />
-              <Card k="09" />
-              <div className="end">จบสาย · ผล: ว่าง</div>
             </section>
           </div>
         </div>

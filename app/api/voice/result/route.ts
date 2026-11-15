@@ -56,11 +56,18 @@ export async function POST(req: NextRequest) {
   const groupOf = (o?: string | null) => (o?.startsWith("avail") ? "avail" : o ?? "");
   const disagree = !!fullOutcome && fullOutcome !== "unclear" && liveOutcome !== "unclear" && groupOf(fullOutcome) !== groupOf(liveOutcome);
   // ตรงกัน → ใช้ผลระหว่างสาย (ละเอียดกว่า เช่น ว่าง · รับต่างชาติ) · ขัดกัน → เชื่อผลฟังทั้งสาย
-  const outcome: Outcome = disagree ? (fullOutcome as Outcome) : liveOutcome !== "unclear" ? liveOutcome : fullOutcome ?? "unclear";
+  let outcome: Outcome = disagree ? (fullOutcome as Outcome) : liveOutcome !== "unclear" ? liveOutcome : fullOutcome ?? "unclear";
   const answers: any[] = Array.isArray(r.answers) ? r.answers : [];
+  // ตรวจซ้ำกับข้อความจริง: ผลออกมา "ว่าง" แต่คำตอบเรื่องห้องว่าง หรือสรุปของ AI บอกว่าไม่ว่าง → ใช้ "ไม่ว่าง" และให้ฟังซ้ำ
+  const availText = [...answers].reverse().find((a) => a.step === "avail" && a.text)?.text ?? "";
+  const NEG_AVAIL = /ไม่ว่าง|ไม่ได้ว่าง|มีคน(เช่า|อยู่|จอง)|เช่า(ไป)?แล้ว|ขาย(ไป)?แล้ว|ปล่อย(ไป)?แล้ว|ไม่มีห้อง|ติดผู้เช่า/;
+  const NEG_SUMMARY = /ห้อง(ยัง)?ไม่ว่าง|ไม่ว่างแล้ว|แจ้งว่าไม่ว่าง|ตอบว่าไม่ว่าง|มี(คน|ผู้)เช่าแล้ว/;
+  const textSaysNo = NEG_AVAIL.test(availText.replace(/\s+/g, "")) || NEG_SUMMARY.test(String(full?.summary ?? "").replace(/\s+/g, ""));
+  const textConflict = groupOf(outcome) === "avail" && textSaysNo;
+  if (textConflict) outcome = "not_avail";
   const pick = (k: string) => live[k] ?? (full?.details as any)?.[k] ?? null;
   // ถ้าระหว่างสายกับหลังจบได้ผลไม่ตรงกัน (เช่น "ยังว่าง" กับ "ไม่ว่าง") → ใช้ผลหลังจบ และติดธงให้แอดมินฟังซ้ำ
-  const conflict = disagree;
+  const conflict = disagree || textConflict;
   const liveSummary = answers.filter((a) => a.text).map((a) => `${a.question ?? a.step}: "${a.text}"`).join(" · ");
 
   await applyCallResult(db, {
@@ -77,10 +84,16 @@ export async function POST(req: NextRequest) {
       price_confirmed: pick("price_confirmed"),
       owner_price: pick("owner_price"),
       accepts_foreigners: pick("accepts_foreigners"),
+      owner_agreed_profile: pick("owner_agreed_profile"),
+      rules_explained: live.accepted_after_rules || pick("accepts_foreigners") === false ? true : null,
+      accepted_after_rules: live.accepted_after_rules ?? null,
+      nationality_told: live.nationality_told ?? null,
       current_lease_until: full?.current_lease_until ?? null,
       summary_th: full?.summary ?? null,
       live_outcome: liveOutcome,
-      needs_review: conflict ? `ระหว่างสายได้ยินว่า "${liveOutcome}" แต่ฟังทั้งสายได้ "${fullOutcome}" — ควรฟังเสียงซ้ำ` : null,
+      needs_review: textConflict
+        ? `ผลจัดเป็น "ว่าง" แต่คำตอบ/สรุปบอกว่าไม่ว่าง${availText ? ` ("${availText}")` : ""} — ระบบเปลี่ยนเป็นไม่ว่าง ควรฟังเสียงซ้ำ`
+        : conflict ? `ระหว่างสายได้ยินว่า "${liveOutcome}" แต่ฟังทั้งสายได้ "${fullOutcome}" — ควรฟังเสียงซ้ำ` : null,
       answer_text: answers.map((a) => a.text).filter(Boolean).join(" / "),
       transcript_full: full?.transcript ?? null,
     },
