@@ -40,6 +40,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     vps: !!process.env.VPS_API_URL && !!process.env.VPS_API_KEY,
     botnoi: !!process.env.BOTNOI_TOKEN,
     voice: !!process.env.VOICE_SERVER_URL && !!process.env.VOICE_SECRET,
+    chat: !!process.env.CHAT_API_KEY,
   };
   const callbackUrl = `${site}/api/yalecom/callback${process.env.YALECOM_CALLBACK_TOKEN ? "?token=<YALECOM_CALLBACK_TOKEN>" : ""}`;
 
@@ -81,7 +82,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <div className="field"><label htmlFor="call_end">หยุดโทร</label><input id="call_end" name="call_end" type="time" defaultValue={String(s.call_end).slice(0, 5)} /></div>
             <div className="field"><label htmlFor="retry_gap_min">ไม่รับสาย: โทรซ้ำทุก (นาที)</label><input id="retry_gap_min" name="retry_gap_min" type="number" min={15} defaultValue={s.retry_gap_min} /></div>
             <div className="field"><label htmlFor="max_attempts">โทรสูงสุด (ครั้ง)</label><input id="max_attempts" name="max_attempts" type="number" min={1} max={10} defaultValue={s.max_attempts} /></div>
-            <div className="field"><label htmlFor="pull_time">ดึงลีดจากเว็บทุกวันเวลา</label><input id="pull_time" name="pull_time" type="time" defaultValue={s.pull_time ?? "09:00"} /></div>
             <div className="field"><label htmlFor="sync_every_min">ส่งผลกลับเว็บทุก (นาที)</label><input id="sync_every_min" name="sync_every_min" type="number" min={5} max={1440} defaultValue={s.sync_every_min ?? 30} /></div>
             <div className="field"><label htmlFor="new_days">ทรัพย์ใหม่: ลงประกาศมาไม่เกิน (วัน)</label><input id="new_days" name="new_days" type="number" min={1} max={90} defaultValue={s.new_days ?? 7} /></div>
             <div className="field"><label htmlFor="stale_days">ทรัพย์เก่า: โทรเช็คเมื่อไม่ได้อัปเดตเกิน (วัน)</label><input id="stale_days" name="stale_days" type="number" min={1} max={365} defaultValue={s.stale_days ?? 30} /></div>
@@ -94,6 +94,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               </div>
             </fieldset>
             <label className="toggle"><input type="checkbox" name="auto_queue" defaultChecked={s.auto_queue} />ส่งห้องใหม่เข้าคิวอัตโนมัติ</label>
+            <div className="field"><label htmlFor="chat_concurrency">โทรจากแชท: สายพร้อมกัน</label><input id="chat_concurrency" name="chat_concurrency" type="number" min={1} max={6} defaultValue={s.chat_concurrency ?? 3} /></div>
+            <div className="field"><label htmlFor="chat_recall_hours">โทรจากแชท: ห้องที่ AI เพิ่งโทร ไม่โทรซ้ำภายใน (ชั่วโมง)</label><input id="chat_recall_hours" name="chat_recall_hours" type="number" min={0} max={720} defaultValue={s.chat_recall_hours ?? 12} /></div>
+
           </div>
         </form>
 
@@ -145,7 +148,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <div className="card-h"><h2>สถานะการเชื่อมต่อ</h2><span className="hint">ค่าเหล่านี้ตั้งใน Environment Variables</span></div>
           <div className="card-b">
             <dl className="kv">
-              <dt>เว็บเท่าไหร่ (VPS_API_URL / VPS_API_KEY)</dt><dd>{env.vps ? `ตั้งแล้ว · ดึงลีดทุกวัน ${s.pull_time ?? "09:00"} · ส่งผลกลับทุก ${s.sync_every_min ?? 30} นาที${s.last_pull_at ? ` · ล่าสุด ${new Date(s.last_pull_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })}` : ""}` : "ยังไม่ตั้ง"}</dd>
+              <dt>เว็บเท่าไหร่ (VPS_API_URL / VPS_API_KEY)</dt><dd>{env.vps ? `ตั้งแล้ว · รับห้องเมื่อทีมค้นในแชท (ไม่ดึงอัตโนมัติ) · ห้องจากแชทส่งผลกลับทันที ห้องอื่นทุก ${s.sync_every_min ?? 30} นาที` : "ยังไม่ตั้ง"}</dd>
               <dt>Server เสียง (VOICE_SERVER_URL / VOICE_SECRET)</dt><dd>{env.voice ? `ตั้งแล้ว · ${process.env.VOICE_SERVER_URL}` : "ยังไม่ตั้ง"}</dd>
               <dt>Botnoi อ่านชื่อคอนโด (BOTNOI_TOKEN)</dt><dd>{env.botnoi ? `ตั้งแล้ว · ${(process.env.BOTNOI_VERSION ?? "v2").toUpperCase()} · ผู้พูด ${process.env.BOTNOI_SPEAKER || "Ava (ค่าเริ่มต้น)"}` : "ยังไม่ตั้ง"}</dd>
               <dt>Yalecom (YALECOM_COMPANY_ID / KEY)</dt><dd>{env.yalecom ? "ตั้งแล้ว" : "ยังไม่ตั้ง"}</dd>
@@ -155,6 +158,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <dt>LINE แจ้งแอดมิน</dt><dd>{env.line ? "ตั้งแล้ว" : "ยังไม่ตั้ง (ไม่บังคับ)"}</dd>
               <dt>CRON_SECRET</dt><dd>{env.cron ? "ตั้งแล้ว" : "ยังไม่ตั้ง"}</dd>
               <dt>INGEST_API_KEY</dt><dd>{env.ingest ? "ตั้งแล้ว" : "ยังไม่ตั้ง"}</dd>
+              <dt>รับห้องจากแชท (CHAT_API_KEY)</dt><dd>{env.chat ? `ตั้งแล้ว · POST ${site}/api/chat/push` : "ยังไม่ตั้ง"}</dd>
             </dl>
           </div>
         </div>

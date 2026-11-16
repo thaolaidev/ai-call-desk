@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { vpsBase } from "./vps";
+import { thaiDateToISO } from "./thaidate";
 
 /** ปลายทางส่งผล: POST {VPS_API_URL}/results (X-API-Key) หรือ VPS_WEBHOOK_URL แบบเดิม (ลายเซ็น HMAC) */
 function target() {
@@ -30,14 +31,21 @@ const FAIL_NOTE: Record<string, string> = {
 /**
  * ข้อมูลที่ส่งกลับไปให้ VPS ต่อ 1 สาย (ใช้ทั้ง webhook และ API ดึงย้อนหลัง)
  * - ติดต่อได้: status = ว่าง/ไม่ว่าง และ status_updated_at = เวลาที่ยิงกลับ → VPS เขียนทับสถานะ + วันที่อัปเดตล่าสุด
- * - ติดต่อไม่ได้: status = null, status_updated_at = null → VPS คงสถานะเดิม บันทึกแค่ note
+ * - ติดต่อไม่ได้: status = "ติดต่อไม่ได้", status_updated_at = null → VPS คงสถานะเดิม บันทึกแค่ประวัติโทร + note
  */
 export function buildResultPayload(call: any, lead: any, sentAt = new Date().toISOString()) {
   const a = (call.analysis ?? {}) as Record<string, any>;
   const status = VPS_STATUS[call.outcome] ?? null;
   const willRetry = call.to_status === "noanswer" || call.to_status === "unclear" || call.to_status === "callback";
+  // วันที่ว่างตามที่เจ้าของพูด → YYYY-MM-DD (API รับแค่รูปแบบนี้) แปลไม่ได้ = ใส่เป็นข้อความใน note
+  const availText: string | null = a.available_from ? String(a.available_from) : null;
+  const availDate = status === "ว่าง" ? thaiDateToISO(availText) : null;
+  const extra = [
+    status === "ว่าง" && availText && !availDate ? `ว่าง: ${availText}` : "",
+    a.owner_price ? `เจ้าของแจ้งราคา ${Number(a.owner_price).toLocaleString("en-US")} บาท` : "",
+  ].filter(Boolean).join(" · ");
   const note = status
-    ? call.summary ?? null
+    ? [call.summary, extra].filter(Boolean).join(" · ") || null
     : `${FAIL_NOTE[call.outcome] ?? "โทรแล้วติดต่อไม่ได้"} (ครั้งที่ ${call.attempt})${willRetry ? " ระบบจะโทรใหม่อัตโนมัติ" : call.outcome === "dnc" ? "" : " รอดึงมาโทรใหม่รอบหน้า"}`;
   return {
     event: "call.completed",
@@ -48,8 +56,16 @@ export function buildResultPayload(call: any, lead: any, sentAt = new Date().toI
     updated_by: "AI Call",
     updated_at: status ? sentAt : null,
     segment: lead.segment,
+    // มาจากแชท: ใช้ 2 ค่านี้อัปเดตการ์ดห้อง (สถานะ + ประวัติโทร) ในกลุ่มที่ส่งมา
+    via_chat: !!call.via_chat,
+    chat_group_uuid: call.chat_group_uuid ?? null,
+    asset_uuid: call.chat_asset_uuid ?? null,
+    ...(availDate ? { available_date: availDate } : {}),
+    available_text: availText,
+    owner_price: a.owner_price ?? null,
     contacted: status !== null,
-    status,
+    // API เว็บเท่าไหร่รับ ว่าง / ไม่ว่าง / ติดต่อไม่ได้ (ห้ามว่าง) — ติดต่อไม่ได้ = คงสถานะห้องเดิม บันทึกแค่ประวัติโทร
+    status: status ?? "ติดต่อไม่ได้",
     status_updated_at: status ? sentAt : null,
     previous_status: lead.vps_status ?? null,
     note,
@@ -68,6 +84,26 @@ export function buildResultPayload(call: any, lead: any, sentAt = new Date().toI
     recording_url: call.recording_url,
     transcript: call.transcript ?? [],
   };
+}
+
+/**
+ * แจ้งเว็บเท่าไหร่ว่า AI เริ่มโทรห้องนี้แล้ว → การ์ดห้องในแชทขึ้น "กำลังโทร" (ห้องจากแชท: โพสต์ในกลุ่มด้วย)
+ * POST {VPS_API_URL}/calling · ไม่สำเร็จก็ไม่เป็นไร (ผลโทรจะส่งตามไปทีหลังอยู่ดี)
+ */
+export async function notifyCalling(lead: any, call?: { chat_group_uuid?: string | null; chat_asset_uuid?: string | null }) {
+  const t = target();
+  if (!t?.key || !lead?.external_id) return;
+  await fetch(`${vpsBase()}/calling`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-Key": t.key },
+    body: JSON.stringify({
+      id: lead.external_id,
+      code: lead.code ?? null,
+      chat_group_uuid: call?.chat_group_uuid ?? lead.chat_group_uuid ?? null,
+      asset_uuid: call?.chat_asset_uuid ?? lead.chat_asset_uuid ?? null,
+    }),
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => null);
 }
 
 export function sign(secret: string, timestamp: string, body: string) {
@@ -116,7 +152,7 @@ export async function deliverResult(db: SupabaseClient, callId: string) {
   if (!error) {
     await db.from("calls").update({ sync_status: "sent", sync_attempts: attempts, synced_at: sentAt, sync_error: null, next_sync_at: null }).eq("id", callId);
     // สถานะที่ยืนยันแล้วถูกเขียนลง VPS → เก็บสำเนาไว้ฝั่งเราด้วย (ห้องนี้จะไม่นับเป็นทรัพย์เก่าอีก n วัน)
-    if (payload.status) await db.from("leads").update({ vps_status: payload.status, vps_updated_at: sentAt }).eq("id", lead.id);
+    if (payload.contacted) await db.from("leads").update({ vps_status: payload.status, vps_updated_at: sentAt }).eq("id", lead.id);
   } else if (attempts > BACKOFF_MIN.length) {
     await db.from("calls").update({ sync_status: "failed", sync_attempts: attempts, sync_error: error, next_sync_at: null }).eq("id", callId);
   } else {

@@ -28,7 +28,7 @@ export default async function ResultsPage({ searchParams }: { searchParams: SP }
   const seg = sp.seg === "old" || sp.seg === "all" ? sp.seg : "new";
   const sb = await createClient();
 
-  let q = sb.from("calls").select("id, outcome, started_at, duration_sec, attempt, summary, segment, sync_status, leads!calls_lead_id_fkey(condo, owner_name, segment)").eq("state", "ended").order("started_at", { ascending: false }).limit(150);
+  let q = sb.from("calls").select("id, outcome, started_at, duration_sec, attempt, summary, segment, sync_status, via_chat, leads!calls_lead_id_fkey(condo, owner_name, segment)").eq("state", "ended").order("started_at", { ascending: false }).limit(150);
   if (outcome !== "all") q = q.eq("outcome", outcome);
   if (seg !== "all") q = q.eq("segment", seg);
   let cq = sb.from("calls").select("outcome, segment").eq("state", "ended").order("started_at", { ascending: false }).limit(5000);
@@ -84,7 +84,7 @@ export default async function ResultsPage({ searchParams }: { searchParams: SP }
               return (
                 <Link key={x.id} href={`${link({ id: x.id })}#detail`} className={`ritem ${x.id === selId ? "on" : ""}`}>
                   <span className="r1"><b>{l?.condo}</b><Pill status={x.outcome} /></span>
-                  <span className="r1 small muted"><span className="mono">{fmtTime(x.started_at)} · {fmtDur(x.duration_sec)}</span><span>{seg === "all" && <span className="seg">{(x.segment ?? l?.segment) === "old" ? "เดิม" : "ใหม่"}</span>} คุณ{l?.owner_name} · ครั้งที่ {x.attempt}</span></span>
+                  <span className="r1 small muted"><span className="mono">{fmtTime(x.started_at)} · {fmtDur(x.duration_sec)}</span><span>{x.via_chat && <span className="seg">แชท</span>}{seg === "all" && <span className="seg">{(x.segment ?? l?.segment) === "old" ? "เดิม" : "ใหม่"}</span>} คุณ{l?.owner_name} · ครั้งที่ {x.attempt}</span></span>
                   <span className="r2">{x.summary}</span>
                 </Link>
               );

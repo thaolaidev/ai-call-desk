@@ -5,6 +5,7 @@ import { prettyPhone } from "@/lib/phone";
 import { Top } from "@/components/Top";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { toggleRoom } from "../actions";
+import { setChatMode } from "./actions";
 
 export const dynamic = "force-dynamic";
 const STATE_LABEL: Record<string, string> = { dialing: "กำลังต่อสาย", ringing: "กำลังเรียก", in_progress: "กำลังคุย" };
@@ -17,7 +18,7 @@ export default async function CallingPage() {
   const dueSoon = new Date(Date.now() + 24 * 3600_000).toISOString();
 
   const [{ data: s, error }, { data: rooms }, { data: live }, ...perSeg] = await Promise.all([
-    sb.from("settings").select("provider, call_start, call_end").eq("id", 1).single(),
+    sb.from("settings").select("*").eq("id", 1).single(),
     sb.from("call_rooms").select("*").order("segment"),
     sb.from("calls").select("id, state, started_at, attempt, segment, leads!calls_lead_id_fkey(condo, unit, owner_name, phone, segment)").in("state", IN_FLIGHT).order("started_at"),
     ...SEGS.flatMap((seg) => [
@@ -31,6 +32,21 @@ export default async function CallingPage() {
   if (error || !s) return <div className="view"><p className="banner err">{error?.message ?? "ไม่พบ settings"}</p></div>;
   if (!rooms?.length) return <div className="view"><p className="banner err">ยังไม่มีห้องโทร · รันไฟล์ update_0006_rooms.sql ใน Supabase ก่อน</p></div>;
 
+  const [chatWaitRes, chatLiveRes] = await Promise.all([
+    sb.from("leads").select("id, condo, code, phone, status, chat_requested_by, chat_requested_at", { count: "exact" })
+      .not("chat_requested_at", "is", null)
+      .or(`status.eq.queued,and(status.in.(noanswer,unclear,callback),next_call_at.lt."${new Date().toISOString()}")`)
+      .order("chat_requested_at").limit(8),
+    sb.from("calls").select("id", { count: "exact", head: true }).eq("via_chat", true).in("state", IN_FLIGHT),
+  ]);
+  const chatMode: string = s.chat_mode ?? (s.chat_enabled === false ? "off" : "auto");
+  const chatWait: any[] = chatWaitRes.data ?? [];
+  const CHAT_MODE_UI = [
+    ["auto", "โทรทันที", "ทีมค้นห้องในแชท → AI โทรเลย"],
+    ["queue", "รับเข้าคิว · รอกดโทร", "เก็บห้องไว้ก่อน กด “โทรทันที” เมื่อพร้อม"],
+    ["off", "ปิดรับ", "ค้นในแชทได้ตามปกติ แต่ไม่ส่งมาให้ AI"],
+  ] as const;
+
   const provider = s.provider === "simulate" ? "โหมดจำลอง" : s.provider === "yalecom" ? "Yalecom (โทรจริง)" : "Vapi (โทรจริง)";
   const anyRunning = rooms.some((r: any) => r.running);
   const liveCalls = (live ?? []) as any[];
@@ -43,6 +59,39 @@ export default async function CallingPage() {
       </Top>
       <AutoRefresh ms={8000} ping={anyRunning || liveCalls.length > 0} />
       <div className="view">
+        <div className={`card room ${chatMode === "auto" ? "on" : ""}`}>
+          <div className="room-row">
+            <h2>ห้องจากแชท “Check สถานะห้อง”</h2>
+            <span className="chip"><span className={`dot ${chatMode === "auto" && (chatLiveRes.count ?? 0) > 0 ? "live" : ""}`} />{chatMode === "auto" ? "โทรทันที" : chatMode === "queue" ? "รอกดโทร" : "ปิดรับ"}</span>
+          </div>
+          <form action={setChatMode} className="segtabs" role="radiogroup" aria-label="โหมดห้องจากแชท" style={{ flexWrap: "wrap" }}>
+            {CHAT_MODE_UI.map(([k, label, hint]) => (
+              <button key={k} name="chat_mode" value={k} className={`btn sm ${chatMode === k ? (k === "off" ? "stop" : "primary") : ""}`} aria-pressed={chatMode === k} title={hint}>
+                {label}
+              </button>
+            ))}
+          </form>
+          <p className="small muted" style={{ margin: 0 }}>
+            {CHAT_MODE_UI.find(([k]) => k === chatMode)?.[2]} · กำลังโทร {chatLiveRes.count ?? 0}/{s.chat_concurrency ?? 3} สาย · รอโทร {chatWaitRes.count ?? 0} ห้อง
+            {chatMode === "queue" && (chatWaitRes.count ?? 0) > 0 ? " — กด “โทรทันที” เพื่อเริ่มโทรห้องที่รอ" : ""}
+          </p>
+          {chatWait.length > 0 && (
+            <table className="tbl stack">
+              <thead><tr><th>ห้อง</th><th>เบอร์</th><th>ส่งมาโดย</th><th>สถานะ</th></tr></thead>
+              <tbody>
+                {chatWait.map((l) => (
+                  <tr key={l.id}>
+                    <td data-label="ห้อง">{l.code ? <span className="mono">{l.code}</span> : null} {l.condo}</td>
+                    <td data-label="เบอร์" className="mono">{prettyPhone(l.phone)}</td>
+                    <td data-label="ส่งมาโดย">{l.chat_requested_by ?? "-"} · {fmtTime(l.chat_requested_at)}</td>
+                    <td data-label="สถานะ">{l.status === "queued" ? "รอโทร" : "รอโทรซ้ำ"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
         <div className="half">
           {SEGS.map((seg, k) => {
             const room: any = rooms.find((r: any) => r.segment === seg) ?? { name: seg, concurrency: 0, daily_cap: 0, running: false };

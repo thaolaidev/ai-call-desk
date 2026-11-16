@@ -1,6 +1,28 @@
 "use server";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { dispatchChat } from "@/lib/chat";
+
+const CHAT_MODES = { auto: "รับห้องจากแชทแล้วโทรทันที", queue: "รับห้องเข้าคิว รอกดโทรเอง", off: "ปิดรับห้องจากแชท" } as const;
+
+/** ปุ่มเลือกโหมดห้องจากแชท (หน้าห้องโทร) · เปลี่ยนเป็น "โทรทันที" = เริ่มโทรห้องที่รออยู่เลย */
+export async function setChatMode(formData: FormData) {
+  const mode = String(formData.get("chat_mode")) as keyof typeof CHAT_MODES;
+  if (!(mode in CHAT_MODES)) redirect("/calling?err=" + encodeURIComponent("โหมดไม่ถูกต้อง"));
+  const supabase = await createClient();
+  const { error } = await supabase.from("settings").update({ chat_mode: mode, chat_enabled: mode !== "off" }).eq("id", 1);
+  if (error) redirect("/calling?err=" + encodeURIComponent(error.message.includes("chat_mode") ? "ยังไม่ได้รัน update_0016_chat_mode.sql" : error.message));
+  let note = "";
+  if (mode === "auto") {
+    const d = await dispatchChat(createAdminClient()).catch((e) => ({ started: 0, waiting: undefined, errors: [String(e)] }));
+    note = d.started ? ` · เริ่มโทร ${d.started} สาย` : d.waiting ? ` · ${d.waiting}` : "";
+  }
+  revalidatePath("/calling");
+  revalidatePath("/settings");
+  redirect("/calling?saved=" + encodeURIComponent(CHAT_MODES[mode] + note));
+}
 
 export async function updateCampaign(formData: FormData) {
   const supabase = await createClient();
@@ -16,8 +38,13 @@ export async function updateCampaign(formData: FormData) {
       auto_queue: formData.get("auto_queue") === "on",
       stale_days: Math.min(365, Math.max(1, Number(formData.get("stale_days")) || 30)),
       new_days: Math.min(90, Math.max(1, Number(formData.get("new_days")) || 7)),
-      pull_time: /^\d{2}:\d{2}$/.test(String(formData.get("pull_time"))) ? String(formData.get("pull_time")) : "09:00",
       sync_every_min: Math.min(1440, Math.max(5, Number(formData.get("sync_every_min")) || 30)),
+      ...(formData.has("chat_concurrency")
+        ? {
+            chat_concurrency: Math.min(6, Math.max(1, Number(formData.get("chat_concurrency")) || 3)),
+            chat_recall_hours: Math.min(720, Math.max(0, Number(formData.get("chat_recall_hours") ?? 12))),
+          }
+        : {}),
     })
     .eq("id", 1);
   for (const seg of ["new", "old"]) {

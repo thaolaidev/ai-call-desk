@@ -25,7 +25,7 @@ export function Toaster() {
       const err = u.searchParams.get("err");
       const saved = u.searchParams.get("saved");
       if (!err && !saved) return;
-      push(err ?? "บันทึกสำเร็จ", !err);
+      push(err ?? (saved && saved !== "1" ? saved : "บันทึกสำเร็จ"), !err);
       u.searchParams.delete("err");
       u.searchParams.delete("saved");
       window.history.replaceState(null, "", u.pathname + (u.search ? u.search : "") + u.hash);

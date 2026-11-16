@@ -7,9 +7,9 @@ import { sipProvider } from "./providers/sip";
 import { pollYalecom } from "./ivr";
 import { bkkClock, todayRangeBKK, toMinutes } from "./time";
 import { syncPending } from "./sync";
-import { pullLeadsIfDue } from "./vps";
 import { fillMissingCondoAudio } from "./botnoi";
 import { fillMissingPriceAudio } from "./priceaudio";
+import { dispatchChat } from "./chat";
 
 const IN_FLIGHT = ["dialing", "ringing", "in_progress"];
 const STALE_MIN = 15; // สายที่ค้างนานเกินนี้ถือว่าล้มเหลว (เช่น webhook ไม่มา)
@@ -55,15 +55,15 @@ export async function tick(): Promise<TickReport> {
 
   // 1d) ส่งผลการโทรที่ค้างกลับไปที่ VPS
   await syncPending(db, s);
-  try {
-    const pulled = await pullLeadsIfDue(db, s.last_pull_at, s.pull_time);
-    if (pulled?.error) report.errors.push(`ดึงลีดจาก VPS: ${pulled.error}`);
-  } catch (e) {
-    report.errors.push(`ดึงลีดจาก VPS: ${e instanceof Error ? e.message : e}`);
-  }
+  // ไม่ดึงลีดจากเว็บอัตโนมัติทุกวันแล้ว — ห้องเข้ามาตอนทีมค้นห้องในแชท (POST /api/chat/push) เท่านั้น
   // ทยอยสร้างเสียงชื่อคอนโดที่ยังไม่มี (ครั้งละ 2 โครงการ)
   await fillMissingCondoAudio(db, 2).catch(() => null);
   await fillMissingPriceAudio(db, 2).catch(() => null);
+
+  // 1e) ห้องที่ส่งมาจากแชท: โทรทันทีโดยไม่ต้องเปิดห้องโทร
+  const chat = await dispatchChat(db, s).catch((e) => ({ started: 0, errors: [e instanceof Error ? e.message : String(e)] }));
+  report.started += chat.started;
+  report.errors.push(...chat.errors.map((e) => `โทรจากแชท: ${e}`));
 
   // 2) เติมสายทีละห้อง (ทรัพย์ใหม่ / ทรัพย์เดิม)
   const { data: rooms } = await db.from("call_rooms").select("*").order("segment");

@@ -32,10 +32,9 @@ const CFG = {
   listenSilence: Number(env("LISTEN_SILENCE_SEC", 1)),
 };
 const APP = "thaolai";
-const ANSWER_SILENCE_SEC = 1; // เจ้าของเงียบ 1 วินาที = ตอบจบ (พูดต่อหลังเว้นจังหวะ ระบบอัดต่อให้)
 const ANSWER_MAX_SEC = 30; // เจ้าของพูดยาวได้สูงสุดต่อคำตอบ
-const TALK_QUIET_MS = 1000; // ตรวจจับเสียงพูด: เงียบ 1 วินาที = หยุดพูดแล้ว
-const NO_ANSWER_MS = 2000; // ถามแล้วเจ้าของไม่เริ่มพูดภายใน 2 วินาที = ไม่ตอบ → ถามซ้ำ
+const TALK_QUIET_MS = 1000; // พูดแล้วเงียบ 1 วินาที = ตอบจบ (ตรวจจับเสียงพูด)
+const NO_ANSWER_SEC = 2; // ถามแล้วเจ้าของไม่พูดภายใน 2 วินาที = ไม่ตอบ → ถามซ้ำ
 const WAIT_QUIET_MAX_MS = 15_000; // ก่อนบอทพูด รอให้เจ้าของพูดจบ (นานสุด 15 วินาที)
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 mkdirSync(CFG.sounds, { recursive: true });
@@ -105,15 +104,21 @@ async function onEvent(e) {
     case "StasisStart":
       if (s && !s.started) {
         s.started = true;
+        s.mixAt = Date.now(); // MixMonitor เริ่มอัดไฟล์ rx ก่อนเข้า Stasis เล็กน้อย
         // เปิดตรวจจับเสียงพูดของเจ้าของ → บอทจะไม่พูดแทรกระหว่างที่เจ้าของยังพูดอยู่
-        await ari("POST", `/channels/${s.id}/variable`, { variable: "TALK_DETECT(set)", value: `${TALK_QUIET_MS},256` }).then(() => { s.talkDetect = true; }).catch((err) => log(s.callId, "talk detect off", err.message));
+        await ari("POST", `/channels/${s.id}/variable`, { variable: "TALK_DETECT(set)", value: `${TALK_QUIET_MS},256` }).then(() => { s.talkDetect = true; log(s.callId, "talk detect on"); }).catch((err) => log(s.callId, "talk detect off", err.message));
         s.answered = true; s.answeredAt = Date.now(); runFlow(s).catch((err) => { log(s.callId, "flow error", err.message); hangup(s); }); }
       break;
     case "ChannelTalkingStarted":
-      if (s) { s.talking = true; s.talkStartAt = Date.now(); }
+      if (s) { s.talking = true; s.talkStarts.push(Date.now()); if (s.rec) s.rec.talked = true; }
       break;
     case "ChannelTalkingFinished":
-      if (s) { s.talking = false; release(`quiet:${s.id}`); }
+      if (s) {
+        s.talking = false;
+        release(`quiet:${s.id}`);
+        // เจ้าของพูดจบแล้ว (เงียบ 1 วินาที) → หยุดอัดเลย ไม่ต้องรอ Asterisk นับเงียบ
+        if (s.rec?.talked) ari("POST", `/recordings/live/${s.rec.name}/stop`).catch(() => {});
+      }
       break;
     case "ChannelStateChange":
       if (s && e.channel.state === "Up" && !s.answered) { s.answered = true; s.answeredAt = Date.now(); }
@@ -183,47 +188,72 @@ async function play(s, sound) {
 }
 
 /** อัดคำตอบสั้นๆ ของเจ้าของ (หยุดเมื่อเงียบ) แล้วให้ Gemini ตีความ */
+/** ตัดเสียงฝั่งเจ้าของจากไฟล์ rx (MixMonitor) ช่วงเวลา fromMs–toMs → wav ใหม่ · null = ทำไม่ได้ */
+async function cutRx(s, fromMs, toMs, out) {
+  if (!s.mixAt) return null;
+  await new Promise((r) => setTimeout(r, 300)); // รอ Asterisk เขียนเสียงล่าสุดลงไฟล์
+  const buf = await readFile(`${CFG.recDir}/rx-${s.callId}.wav`).catch(() => null);
+  if (!buf || buf.length < 1000) return null;
+  const at = (ms) => 44 + Math.max(0, Math.round(((ms - s.mixAt) / 1000) * 8000)) * 2; // wav 8kHz 16-bit mono
+  const a = Math.min(at(fromMs), buf.length), b = Math.min(at(toMs), buf.length);
+  if (b - a < 8000) return null; // สั้นกว่า 0.5 วินาที
+  const data = buf.subarray(a, b);
+  const h = Buffer.alloc(44);
+  h.write("RIFF", 0); h.writeUInt32LE(36 + data.length, 4); h.write("WAVE", 8); h.write("fmt ", 12);
+  h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(8000, 24); h.writeUInt32LE(16000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34);
+  h.write("data", 36); h.writeUInt32LE(data.length, 40);
+  await writeFile(out, Buffer.concat([h, data]));
+  return out;
+}
+
 /** อัดเสียง 1 ช่วง หยุดเมื่อเจ้าของเงียบตามที่กำหนด */
-async function recordOnce(s, name, silenceSec, noAnswerMs = 0) {
+async function recordOnce(s, name) {
   const done = wait(s, `recording:${name}`, (ANSWER_MAX_SEC + 5) * 1000);
-  const t0 = Date.now();
-  // เจ้าของยังไม่เริ่มพูดภายในเวลาที่กำหนด → หยุดอัด (ถือว่าไม่ตอบ) · ใช้ได้เมื่อเปิดตรวจจับเสียงพูดสำเร็จ
-  const cut = noAnswerMs && s.talkDetect
-    ? setTimeout(() => { if (!s.talking && !(s.talkStartAt > t0)) { s.noAnswer = name; ari("POST", `/recordings/live/${name}/stop`).catch(() => {}); } }, noAnswerMs)
-    : null;
+  // Asterisk หยุดอัดเมื่อเงียบ NO_ANSWER_SEC (ทั้งตอนยังไม่เริ่มพูด = ไม่ตอบ และตอนพูดจบ = สำรอง)
+  // ถ้าตรวจจับเสียงพูดได้ → หยุดเร็วขึ้นทันทีที่เจ้าของพูดจบ (เงียบ 1 วินาที) ดูที่ ChannelTalkingFinished
+  s.rec = { name, talked: !!s.talking }; // เริ่มพูดมาก่อนแล้ว (พูดสวนตอนบอทถาม) ก็นับว่าพูดแล้ว
   try {
     await ari("POST", `/channels/${s.id}/record`, {
-      name, format: "wav", maxDurationSeconds: ANSWER_MAX_SEC, maxSilenceSeconds: Math.max(1, Math.round(silenceSec ?? CFG.listenSilence)), ifExists: "overwrite", beep: "false", terminateOn: "none",
+      name, format: "wav", maxDurationSeconds: ANSWER_MAX_SEC, maxSilenceSeconds: NO_ANSWER_SEC, ifExists: "overwrite", beep: "false", terminateOn: "none",
     });
-  } catch (err) { release(`recording:${name}`); if (s.gone) return null; throw err; }
+  } catch (err) { s.rec = null; release(`recording:${name}`); if (s.gone) return null; throw err; }
   const r = await done;
-  if (cut) clearTimeout(cut);
+  s.rec = null;
   if (r.hangup || s.gone) return null;
   return `${CFG.recDir}/${name}.wav`;
 }
 
-async function listen(s, kind, question, silenceSec) {
+async function listen(s, kind, question) {
   if (s.gone) return { intent: "hangup" };
   const name = `ans-${s.callId}-${++s.turn}`;
-  const first = await recordOnce(s, name, silenceSec, NO_ANSWER_MS);
+  const recStart = Date.now();
+  // เจ้าของเริ่มพูดตั้งแต่บอทยังถามไม่จบ (พูดสวน) → คำตอบบางส่วน/ทั้งหมดอยู่ก่อนเริ่มอัด
+  const overlapAt = s.talkStarts.find((t) => t >= s.qStart && t < recStart - 150);
+  const first = await recordOnce(s, name);
   if (!first) return { intent: "hangup" };
-  if (s.noAnswer === name) return log(s.callId, kind, "no answer"), { intent: "silent", text: "" };
   // เจ้าของเว้นจังหวะแล้วพูดต่อ → อัดต่ออีกช่วง แล้วรวมเป็นคำตอบเดียว (สูงสุด 3 ช่วง)
   const parts = [first];
   for (let i = 1; i <= 2 && s.talking && !s.gone; i++) {
     log(s.callId, kind, "owner continued, recording more");
-    const more = await recordOnce(s, `${name}-c${i}`, silenceSec);
+    const more = await recordOnce(s, `${name}-c${i}`);
     if (!more) return { intent: "hangup" };
     parts.push(more);
   }
-  let file = first;
+  // ส่วนที่เจ้าของพูดสวนก่อนเริ่มอัด → ดึงจากไฟล์ rx มาต่อหน้าคำตอบ
+  if (overlapAt) {
+    const pre = await cutRx(s, overlapAt - 400, recStart, `${CFG.recDir}/${name}-ov.wav`);
+    if (pre) { log(s.callId, kind, `owner spoke over the question (${recStart - overlapAt}ms early)`); parts.unshift(pre); }
+  }
+  const sizes = await Promise.all(parts.map((f) => stat(f).then((x) => x.size).catch(() => 0)));
+  const usable = parts.filter((_, i) => sizes[i] > 1000);
+  parts.length = 0; parts.push(...(usable.length ? usable : [first]));
+  let file = parts[0];
   if (parts.length > 1) {
     file = `${CFG.recDir}/${name}-all.wav`;
     await run("ffmpeg", ["-loglevel", "error", "-y", ...parts.flatMap((f) => ["-i", f]), "-filter_complex", `concat=n=${parts.length}:v=0:a=1`, "-ar", "8000", "-ac", "1", file]).catch(() => { file = first; });
   }
   const size = await stat(file).then((x) => x.size).catch(() => 0);
-  if (size < 8000) return log(s.callId, kind, "silence"), { intent: "silent", text: "" }; // < ~0.5 วินาที
-  // เล่นเสียงรับคำสั้นๆ (เช่น "ค่ะ") ระหว่างรอ AI ตีความ → ไม่เงียบนาน
+  if (size < 8000) return log(s.callId, kind, "no answer"), { intent: "silent", text: "" }; // < ~0.5 วินาที = ไม่ได้พูด
   const [a] = await Promise.all([understand(kind, question, await readFile(file)), s.on("ack") ? play(s, s.snd.ack) : null]);
   s.answers.push({ step: kind, question, ...a });
   log(s.callId, kind, JSON.stringify(a));
@@ -299,13 +329,13 @@ async function understand(kind, question, wav) {
 // ---------- บทโทร (แยกทางตามคำตอบ) ----------
 async function runFlow(s) {
   const P = (k) => (s.on(k) ? play(s, s.snd[k]) : null);
-  const L = (kind, _step, q) => listen(s, kind, q, ANSWER_SILENCE_SEC); // เจ้าของเงียบ 1 วินาที = ตอบจบ
+  const L = (kind, _step, q) => listen(s, kind, q); // ไม่พูด 2 วินาที = ไม่ตอบ · พูดแล้วเงียบ 1 วินาที = ตอบจบ
   const Q = (k) => s.title[k] ?? k;
   /** ถามแล้วรอคำตอบ · เจ้าของไม่ตอบ (เงียบ 2 วินาที) → ถามซ้ำ 1 ครั้ง · retryUnclear = ฟังไม่ออกก็ถามซ้ำ */
   const ask = async (kind, q, say, retryUnclear = false) => {
-    await say();
+    s.qStart = Date.now(); await say();
     let a = await L(kind, null, q);
-    if (!s.gone && (a.intent === "silent" || (retryUnclear && a.intent === "unclear"))) { await say(); a = await L(kind, null, `${q} (ถามซ้ำ)`); }
+    if (!s.gone && (a.intent === "silent" || (retryUnclear && a.intent === "unclear"))) { s.qStart = Date.now(); await say(); a = await L(kind, null, `${q} (ถามซ้ำ)`); }
     return a;
   };
   const live = (s.live = { outcome: "unclear", ready_now: null, available_from: null, price_confirmed: null, owner_price: null, accepts_foreigners: null, owner_agreed_profile: null, nationality_told: null, accepted_after_rules: null });
@@ -436,8 +466,9 @@ async function finish(s) {
     await new Promise((r) => setTimeout(r, [2000, 10_000, 30_000][i] ?? 60_000));
   }
   // ลบไฟล์ชั่วคราว (เก็บไฟล์เต็มไว้ที่เว็บแล้ว)
-  for (let n = 1; n <= s.turn; n++) for (const x of ["", "-c1", "-c2", "-all"]) await unlink(`${CFG.recDir}/ans-${s.callId}-${n}${x}.wav`).catch(() => {});
+  for (let n = 1; n <= s.turn; n++) for (const x of ["", "-c1", "-c2", "-all", "-ov"]) await unlink(`${CFG.recDir}/ans-${s.callId}-${n}${x}.wav`).catch(() => {});
   if (mp3) await unlink(`${CFG.recDir}/full-${s.callId}.wav`).catch(() => {});
+  await unlink(`${CFG.recDir}/rx-${s.callId}.wav`).catch(() => {});
 }
 
 // ---------- รับคำสั่งโทรจากเว็บ ----------
@@ -456,7 +487,7 @@ async function startCall(body) {
   const enabled = new Set(body.enabled ?? Object.keys(snd));
 
   const id = `tl-${callId}`;
-  const s = { id, callId, mode: body.mode === "short" ? "short" : "full", turn: 0, answers: [], pending: new Set(), snd, title: body.titles ?? {}, on: (k) => enabled.has(k) && !!snd[k], started: false, answered: false, gone: false };
+  const s = { id, callId, mode: body.mode === "short" ? "short" : "full", turn: 0, answers: [], pending: new Set(), snd, title: body.titles ?? {}, on: (k) => enabled.has(k) && !!snd[k], started: false, answered: false, gone: false, talkStarts: [], qStart: 0 };
   sessions.set(id, s);
   // กันค้าง: ไม่มีใครรับเกินเวลา → ปิดเป็นไม่รับสาย · คุยเกิน 6 นาที → วางสาย
   s.timer = setTimeout(() => { if (!s.answered && !s.finished) { s.cause = s.cause ?? 19; hangup(s); finish(s); } }, (CFG.ringTimeout + 20) * 1000);

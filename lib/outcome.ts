@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { notifyLine } from "./line";
 import { prettyPhone } from "./phone";
 import type { LeadStatus, Outcome } from "./status";
+import { deliverResult } from "./sync";
+import { dispatchChat } from "./chat";
 
 export type Turn = { role: "ai" | "owner" | "system"; text: string };
 
@@ -90,6 +92,12 @@ export async function applyCallResult(db: SupabaseClient, r: CallResult) {
       current_lease_until: typeof a.current_lease_until === "string" ? a.current_lease_until : lead.current_lease_until,
     })
     .eq("id", lead.id);
+
+  // ห้องจากแชท: ส่งผลกลับทันที (ไม่รอรอบ 30 นาที) ให้การ์ดห้องอัปเดต แล้วโทรห้องถัดไปในคิวแชทต่อ
+  if (call.via_chat) {
+    await deliverResult(db, r.callId).catch(() => null);
+    await dispatchChat(db).catch(() => null);
+  }
 
   if (r.outcome === "dnc") {
     await db.from("dnc_numbers").upsert({ phone: lead.phone, reason: summary ?? "เจ้าของขอไม่ให้ติดต่อ" });
