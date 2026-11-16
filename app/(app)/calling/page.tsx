@@ -75,7 +75,7 @@ export default async function CallingPage() {
                     <span className="chip"><span className={`dot ${mode === "auto" && calls.length ? "live" : ""}`} />{MODE_CHIP[mode] ?? mode}</span>
                   </div>
                   <span className="small muted">{ROOM_HINT[seg]}</span>
-                  <form action={setChatMode} className="segtabs" role="radiogroup" aria-label={`โหมดห้อง ${room.name}`} style={{ flexWrap: "wrap" }}>
+                  <form action={setChatMode} className="mode-btns" role="radiogroup" aria-label={`โหมดห้อง ${room.name}`}>
                     <input type="hidden" name="segment" value={seg} />
                     {MODE_UI.map(([key, label, hint]) => (
                       <button key={key} name="chat_mode" value={key} className={`btn sm ${mode === key ? (key === "off" ? "stop" : "primary") : ""}`} aria-pressed={mode === key} title={hint}>
@@ -112,27 +112,20 @@ export default async function CallingPage() {
 
                 <div className="card">
                   <div className="card-h"><h3>คิวรอโทร</h3><span className="hint">{waitN} ห้อง</span></div>
-                  {queue.length > 0 ? (
-                    <table className="tbl stack">
-                      <thead><tr><th>ห้อง</th><th>เบอร์</th><th>ส่งมาโดย</th><th>สถานะ</th><th aria-label="ลบ" /></tr></thead>
-                      <tbody>
-                        {queue.map((l) => (
-                          <tr key={l.id}>
-                            <td data-label="ห้อง">{l.code ? <span className="mono">{l.code} </span> : null}{l.condo}</td>
-                            <td data-label="เบอร์" className="mono">{prettyPhone(l.phone)}</td>
-                            <td data-label="ส่งมาโดย">{l.chat_requested_by ?? "-"} · {fmtTime(l.chat_requested_at)}</td>
-                            <td data-label="สถานะ">{l.status === "queued" ? "รอโทร" : `รอโทรซ้ำ${l.next_call_at ? ` ${fmtTime(l.next_call_at)}` : ""}`}</td>
-                            <td data-label="">
-                              <form action={removeChatQueued}>
-                                <input type="hidden" name="id" value={l.id} />
-                                <button className="btn sm" title="เอาห้องนี้ออกจากคิว AI จะไม่โทร">ลบออกจากคิว</button>
-                              </form>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : <p className="empty">ไม่มีห้องในคิว</p>}
+                  {queue.length > 0 ? queue.map((l) => (
+                    <div className="q-row" key={l.id}>
+                      <div className="q-main">
+                        <b>{l.code ? <span className="mono">{l.code} </span> : null}{l.condo}</b>
+                        <span className="small muted">
+                          <span className="mono">{prettyPhone(l.phone)}</span> · {l.chat_requested_by ?? "-"} {fmtTime(l.chat_requested_at)} · {l.status === "queued" ? "รอโทร" : `รอโทรซ้ำ${l.next_call_at ? ` ${fmtTime(l.next_call_at)}` : ""}`}
+                        </span>
+                      </div>
+                      <form action={removeChatQueued}>
+                        <input type="hidden" name="id" value={l.id} />
+                        <button className="btn sm" title="เอาห้องนี้ออกจากคิว AI จะไม่โทร">ลบ</button>
+                      </form>
+                    </div>
+                  )) : <p className="empty">ไม่มีห้องในคิว</p>}
                   {waitN > 0 && (
                     <form action={removeChatQueued} className="card-b" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                       <input type="hidden" name="all" value="1" />

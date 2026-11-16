@@ -255,3 +255,14 @@ pre.code{margin:0;padding:16px;background:#0f1626;color:#dfe6f3;border-radius:10
 .toast.ok span{background:var(--ok)} .toast.bad span{background:var(--bad)} .toast.bad{border-color:var(--bad)}
 @keyframes toast-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.toast{animation:none}}
+
+/* หน้าห้องโทร: ปุ่มโหมด + คิวรอโทร (ไม่ล้นกรอบในคอลัมน์ครึ่งจอ) */
+.mode-btns{display:flex;flex-wrap:wrap;gap:6px}
+.mode-btns .btn{white-space:nowrap}
+.q-row{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 18px;border-bottom:1px solid var(--line);min-width:0}
+.q-row:last-of-type{border-bottom:0}
+.q-main{display:flex;flex-direction:column;gap:2px;min-width:0}
+.q-main b{font-weight:500;overflow-wrap:anywhere}
+.q-main .small{overflow-wrap:anywhere}
+.q-row form{flex:none}
+.room .room-row{flex-wrap:wrap;gap:8px}
