@@ -60,3 +60,23 @@ export async function updateCampaign(formData: FormData) {
   revalidatePath("/calling");
   revalidatePath("/settings");
 }
+
+const WAITING = ["queued", "noanswer", "unclear", "callback"];
+
+/** เอาห้องจากแชทออกจากคิวโทร (id เดียว หรือ all = ทั้งหมดที่รออยู่) · ห้องที่กำลังโทรอยู่ไม่แตะ */
+export async function removeChatQueued(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  const all = formData.get("all") === "1";
+  if (!id && !all) redirect("/calling?err=" + encodeURIComponent("ไม่พบห้องที่จะลบ"));
+  const supabase = await createClient();
+  let q = supabase
+    .from("leads")
+    .update({ status: "new", chat_requested_at: null, next_call_at: null })
+    .not("chat_requested_at", "is", null)
+    .in("status", WAITING);
+  if (!all) q = q.eq("id", id);
+  const { data, error } = await q.select("id");
+  if (error) redirect("/calling?err=" + encodeURIComponent(error.message));
+  revalidatePath("/calling");
+  redirect("/calling?saved=" + encodeURIComponent(`ลบออกจากคิวแล้ว ${data?.length ?? 0} ห้อง`));
+}

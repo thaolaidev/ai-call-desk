@@ -5,7 +5,7 @@ import { prettyPhone } from "@/lib/phone";
 import { Top } from "@/components/Top";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { toggleRoom } from "../actions";
-import { setChatMode } from "./actions";
+import { setChatMode, removeChatQueued } from "./actions";
 
 export const dynamic = "force-dynamic";
 const STATE_LABEL: Record<string, string> = { dialing: "กำลังต่อสาย", ringing: "กำลังเรียก", in_progress: "กำลังคุย" };
@@ -77,7 +77,7 @@ export default async function CallingPage() {
           </p>
           {chatWait.length > 0 && (
             <table className="tbl stack">
-              <thead><tr><th>ห้อง</th><th>เบอร์</th><th>ส่งมาโดย</th><th>สถานะ</th></tr></thead>
+              <thead><tr><th>ห้อง</th><th>เบอร์</th><th>ส่งมาโดย</th><th>สถานะ</th><th aria-label="ลบ" /></tr></thead>
               <tbody>
                 {chatWait.map((l) => (
                   <tr key={l.id}>
@@ -85,10 +85,23 @@ export default async function CallingPage() {
                     <td data-label="เบอร์" className="mono">{prettyPhone(l.phone)}</td>
                     <td data-label="ส่งมาโดย">{l.chat_requested_by ?? "-"} · {fmtTime(l.chat_requested_at)}</td>
                     <td data-label="สถานะ">{l.status === "queued" ? "รอโทร" : "รอโทรซ้ำ"}</td>
+                    <td data-label="">
+                      <form action={removeChatQueued}>
+                        <input type="hidden" name="id" value={l.id} />
+                        <button className="btn sm" title="เอาห้องนี้ออกจากคิว AI จะไม่โทร">ลบออกจากคิว</button>
+                      </form>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          )}
+          {(chatWaitRes.count ?? 0) > 0 && (
+            <form action={removeChatQueued} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input type="hidden" name="all" value="1" />
+              <button className="btn sm stop">ลบทั้งคิว ({chatWaitRes.count} ห้อง)</button>
+              {(chatWaitRes.count ?? 0) > chatWait.length && <span className="small muted">แสดง {chatWait.length} ห้องแรก</span>}
+            </form>
           )}
         </div>
 
