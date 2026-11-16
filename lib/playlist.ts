@@ -9,7 +9,9 @@ export const SILENCE_MP3_B64 = "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAA
 export const DEFAULT_PLAY: Record<string, { enabled: boolean; wait: number }> = {
   ack: { enabled: true, wait: 0 },
   "02B": { enabled: true, wait: 0 },
-  "01": { enabled: true, wait: 0 },
+  "01-1": { enabled: true, wait: 1 },
+  "01-2": { enabled: true, wait: 1 },
+  "01-3": { enabled: true, wait: 0 },
   "02-1": { enabled: true, wait: 0 },
   "02-2": { enabled: true, wait: 1 },
   "03": { enabled: true, wait: 1 },

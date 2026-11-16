@@ -24,8 +24,9 @@ export const sipProvider: CallProvider = {
       findPriceAudio(db, lead.rent),
     ]);
     const audio: Record<string, string> = {};
-    for (const r of rows ?? []) if (STEPS[r.step_key]) audio[r.step_key] = bucket.getPublicUrl(r.path).data.publicUrl;
-    if (!audio["01"] || !audio["02-2"]) throw new Error("ยังไม่มีไฟล์เสียงบทโทร (อย่างน้อยท่อน 01 และ 02-2) ในหน้าบทโทร");
+    // "01" = ท่อนทักทายแบบเดิม (ก่อนแบ่ง 3 ท่อน) ใช้แทนได้จนกว่าจะอัปโหลด 01-1 ถึง 01-3
+    for (const r of rows ?? []) if (STEPS[r.step_key] || r.step_key === "01") audio[r.step_key] = bucket.getPublicUrl(r.path).data.publicUrl;
+    if (!(audio["01-1"] || audio["01"]) || !audio["02-2"]) throw new Error("ยังไม่มีไฟล์เสียงบทโทร (อย่างน้อยท่อนทักทาย 01-1 และ 02-2) ในหน้าบทโทร");
 
     const res = await fetch(`${base}/call`, {
       method: "POST",

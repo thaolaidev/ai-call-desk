@@ -95,7 +95,11 @@ export default async function ScriptPage() {
           <div className="or">“รับทราบค่ะ” เล่นทันทีหลังเจ้าของตอบจบทุกคำถาม ระหว่างรอ AI ตีความคำตอบ</div>
           <Card k="ack" />
           <div className="end">เริ่มบทโทร</div>
-          <Card k="01" />
+          <Card k="01-1" />
+          <div className="or">เว้น 1 วินาที</div>
+          <Card k="01-2" />
+          <div className="or">เว้น 1 วินาที</div>
+          <Card k="01-3" />
           <Down />
           <Card k="02-1" />
           <Down />

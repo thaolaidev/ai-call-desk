@@ -341,7 +341,14 @@ async function runFlow(s) {
   };
   const live = (s.live = { outcome: "unclear", ready_now: null, available_from: null, price_confirmed: null, owner_price: null, accepts_foreigners: null, owner_agreed_profile: null, nationality_told: null, accepted_after_rules: null });
 
-  await P("01");
+  // ทักทาย 3 ท่อน เว้นท่อนละ 1 วินาที (ให้เจ้าของตั้งตัว) · ยังไม่มีไฟล์ท่อนใหม่ = ใช้ไฟล์ 01 เดิม
+  const gap = (ms) => new Promise((r) => setTimeout(r, ms));
+  if (s.snd["01-1"]) {
+    await P("01-1"); if (s.gone) return; await gap(1000);
+    await P("01-2"); if (s.gone) return; await gap(1000);
+    await P("01-3");
+  } else await play(s, s.snd["01"]);
+  if (s.gone) return;
   await P("02-1");
   if (s.snd.condo) await play(s, s.snd.condo);
   const a = await ask("avail", "ห้องยังว่างอยู่ไหม", () => P("02-2"), true);
