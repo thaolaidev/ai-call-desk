@@ -9,7 +9,7 @@ import { bkkClock, todayRangeBKK, toMinutes } from "./time";
 import { syncPending } from "./sync";
 import { fillMissingCondoAudio } from "./botnoi";
 import { fillMissingPriceAudio } from "./priceaudio";
-import { dispatchChat } from "./chat";
+import { dispatchChat, prepareAudio } from "./chat";
 
 const IN_FLIGHT = ["dialing", "ringing", "in_progress"];
 const STALE_MIN = 15; // สายที่ค้างนานเกินนี้ถือว่าล้มเหลว (เช่น webhook ไม่มา)
@@ -101,6 +101,7 @@ export async function tick(): Promise<TickReport> {
         continue;
       }
       try {
+        await prepareAudio(db, lead).catch(() => null); // เสียงชื่อคอนโด (ชื่อไทยจากคลัง) + ราคา
         const r = await provider.start({ callId: call.id, lead, settings: s });
         await db
           .from("calls")

@@ -8,12 +8,33 @@ import { notifyCalling } from "./sync";
 import { findCondoAudio } from "./condolib";
 import { ensureCondoAudio, defaultReading } from "./botnoi";
 import { findPriceAudio, ensurePriceAudio } from "./priceaudio";
+import { matchCondo } from "./condomatch";
 
-/** ห้องจากแชทมาแบบไม่ได้เตรียมไว้ก่อน: สร้างเสียงชื่อคอนโด/ราคาด้วย Botnoi ก่อนโทร (ไม่สำเร็จ = โทรต่อโดยข้ามท่อนนั้น) */
-async function prepareAudio(db: SupabaseClient, lead: any) {
-  const condo = await findCondoAudio(db, { condo: lead.condo, condo_id: lead.condo_id ?? null }).catch(() => null);
-  // ชื่อที่ไม่มีภาษาไทย (เช่นแอดมินพิมพ์ "Ideo Mobi Asoke") → ให้ Botnoi อ่านตามที่พิมพ์
-  if (!condo?.path) await ensureCondoAudio(db, lead.condo, { condo_id: lead.condo_id ?? null, text: defaultReading(lead.condo) ?? lead.condo }).catch(() => null);
+/**
+ * ก่อนโทร: หาเสียงชื่อคอนโดจากคลัง แล้วสร้างให้ถ้ายังไม่มี (อ่านชื่อไทยในคลังเสมอ)
+ *  1) condo_id (location_id จากเว็บ) ตรงกับคลัง → ใช้แถวนั้น
+ *  2) ไม่มี/ไม่เจอ → จับคู่ชื่อกับคลัง (matchCondo) แล้วผูก lead กับแถวในคลัง
+ *  3) ไม่เจอเลย → สร้างจากชื่อที่มี (ไทยถ้ามี ไม่งั้นตามที่พิมพ์)
+ * ราคา: สร้างเสียงราคาถ้ายังไม่มี · ไม่สำเร็จ = โทรต่อโดยข้ามท่อนนั้น
+ */
+export async function prepareAudio(db: SupabaseClient, lead: any) {
+  let row: any = await findCondoAudio(db, { condo: lead.condo, condo_id: lead.condo_id ?? null }).catch(() => null);
+  if (row && !row.condo_id && /[A-Za-z]/.test(String(row.tts_text ?? "")) && !/[\u0E00-\u0E7F]/.test(String(row.tts_text ?? ""))) row = null; // แถวที่อ่านอังกฤษ → ลองคลังก่อน
+  if (!row) {
+    const m = await matchCondo(db, lead.condo).catch(() => null);
+    if (m) {
+      lead.condo_id = m.condo_id ?? lead.condo_id;
+      await db.from("leads").update({ condo_id: lead.condo_id }).eq("id", lead.id);
+      row = await findCondoAudio(db, { condo: m.condo, condo_id: m.condo_id }).catch(() => null);
+    }
+  }
+  if (row?.path) return void (await priceAudio(db, lead));
+  const name = row?.condo ?? lead.condo;
+  await ensureCondoAudio(db, name, { condo_id: row?.condo_id ?? lead.condo_id ?? null, text: defaultReading(name) ?? name }).catch(() => null);
+  await priceAudio(db, lead);
+}
+
+async function priceAudio(db: SupabaseClient, lead: any) {
   if (lead.rent && !(await findPriceAudio(db, lead.rent).catch(() => null))) await ensurePriceAudio(db, lead.rent).catch(() => null);
 }
 
