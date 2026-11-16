@@ -6,13 +6,14 @@ import { sipProvider } from "./providers/sip";
 import { bkkClock, toMinutes } from "./time";
 import { notifyCalling } from "./sync";
 import { findCondoAudio } from "./condolib";
-import { ensureCondoAudio } from "./botnoi";
+import { ensureCondoAudio, defaultReading } from "./botnoi";
 import { findPriceAudio, ensurePriceAudio } from "./priceaudio";
 
 /** ห้องจากแชทมาแบบไม่ได้เตรียมไว้ก่อน: สร้างเสียงชื่อคอนโด/ราคาด้วย Botnoi ก่อนโทร (ไม่สำเร็จ = โทรต่อโดยข้ามท่อนนั้น) */
 async function prepareAudio(db: SupabaseClient, lead: any) {
   const condo = await findCondoAudio(db, { condo: lead.condo, condo_id: lead.condo_id ?? null }).catch(() => null);
-  if (!condo?.path) await ensureCondoAudio(db, lead.condo, { condo_id: lead.condo_id ?? null }).catch(() => null);
+  // ชื่อที่ไม่มีภาษาไทย (เช่นแอดมินพิมพ์ "Ideo Mobi Asoke") → ให้ Botnoi อ่านตามที่พิมพ์
+  if (!condo?.path) await ensureCondoAudio(db, lead.condo, { condo_id: lead.condo_id ?? null, text: defaultReading(lead.condo) ?? lead.condo }).catch(() => null);
   if (lead.rent && !(await findPriceAudio(db, lead.rent).catch(() => null))) await ensurePriceAudio(db, lead.rent).catch(() => null);
 }
 

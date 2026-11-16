@@ -40,6 +40,22 @@ export async function POST(req: NextRequest) {
     : { data: [] as any[] };
   const byId = new Map((existing ?? []).map((l: any) => [l.external_id, l]));
 
+  // ห้องจากข้อความในแชท (id = msg-…) ยังไม่มีในหลังบ้าน: ถ้าเบอร์+คอนโดเดียวกันเคยส่งมาแล้ว ใช้ลีดเดิม (ย้าย id ไปข้อความล่าสุด)
+  const msgRooms = rooms.filter((r) => String(r?.id ?? "").startsWith("msg-") && r?.phone && (r?.condo_name ?? r?.condo));
+  if (msgRooms.length) {
+    const phones = [...new Set(msgRooms.map((r) => normalizePhone(String(r.phone))))];
+    const { data: same } = await db.from("leads").select("id, external_id, phone, condo, status, last_called_at, last_summary").in("phone", phones);
+    for (const r of msgRooms) {
+      const name = String(r.condo_name ?? r.condo).trim().toLowerCase();
+      const l: any = (same ?? []).find((x: any) => x.phone === normalizePhone(String(r.phone)) && String(x.condo).trim().toLowerCase() === name);
+      if (!l || l.external_id === String(r.id)) continue;
+      byId.set(String(r.id), l); // ใช้กฎกันโทรซ้ำของลีดเดิม
+      if (!["calling", "queued"].includes(l.status) && !(l.last_called_at && Date.now() - Date.parse(l.last_called_at) < recallMs)) {
+        await db.from("leads").update({ external_id: String(r.id) }).eq("id", l.id);
+      }
+    }
+  }
+
   for (const r of rooms) {
     const id = r?.id != null ? String(r.id) : null;
     const asset = r?.asset_uuid ? String(r.asset_uuid) : null;

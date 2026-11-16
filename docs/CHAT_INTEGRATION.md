@@ -15,7 +15,7 @@
   → การ์ดในแชทรีเฟรชเองภายใน ~15 วินาที (ไม่มีข้อความแจ้งในกลุ่ม)
 ```
 
-## แพตช์ทำอะไรบ้าง (10 ไฟล์ ไม่มี migration)
+## แพตช์ทำอะไรบ้าง (12 ไฟล์ ไม่มี migration)
 
 | ไฟล์ | เปลี่ยน |
 |---|---|
@@ -26,7 +26,10 @@
 | `repository/ai_call_repository.go` | `ListLeadsFiltered` (listed_after / listed_before / updated_before) · `LeadsByAssetIDs` · `CancelLatestCalling` · ดึง price, ref_location_id |
 | `handler/ai_call_handler.go` + `app/router.go` | ใหม่ `POST /ai-call/calling` { id, chat_group_uuid?, asset_uuid? } → บันทึกประวัติโทร "กำลังโทร" (เหมือนกดปุ่มโทรบนการ์ด) |
 | `handler/ai_call_handler.go` | GET `/ai-call/leads` รับ `listed_after`, `listed_before`, `updated_before` (ISO 8601), `page`, `per_page` — ไม่ส่ง = ทำงานแบบเดิมทุกอย่าง |
-| `app/app.go` | ผูก ChatService → AICallService |
+| `service/ai_call_text.go` (ใหม่) | กลุ่ม "Check ทรัพย์ใหม่": ข้อความที่มีเบอร์ + ชื่อคอนโด → ส่งให้ AI โทร · ผลโทรตั้งเป็นปุ่มสถานะใต้ข้อความ |
+| `service/chat_service.go` (PostText) | เรียก `pushTextToAICall` หลังโพสต์ข้อความ |
+| `app/app.go` | ผูก ChatService ↔ AICallService |
+| `Docker/nginx/default.conf` | เพิ่ม server block `voice.thaolai-check.online` (server เสียงของห้องโทร) — เดิมเพิ่มบน PRD ตรง ๆ แล้วถูก Jenkins sync ทับหาย |
 
 ของเดิมไม่เปลี่ยนพฤติกรรม: กลุ่มที่ไม่อยู่ใน `AI_CALL_CHAT_GROUPS` หรือไม่ได้ตั้ง env = ไม่ส่งอะไรเลย · GET leads แบบเดิม (status/min_days/limit/offset) ยังเหมือนเดิม
 
@@ -47,6 +50,7 @@ env บน PRD (ไฟล์ .env ของ api):
 AI_CALL_DESK_URL=https://ai-call-desk.vercel.app
 AI_CALL_DESK_KEY=<ค่าเดียวกับ CHAT_API_KEY ใน Vercel ของห้องโทร>
 AI_CALL_CHAT_GROUPS=<uuid ของกลุ่ม "Check สถานะห้อง">
+AI_CALL_TEXT_GROUPS=<uuid ของกลุ่ม "Check ทรัพย์ใหม่">
 AI_CALL_BOT_USER_ID=<id ของผู้ใช้หลังบ้านชื่อ "AI Call">   # มีอยู่แล้ว — ตั้งไว้ให้การ์ด/หลังบ้านขึ้นชื่อผู้อัปเดตเป็น AI Call
 ```
 
@@ -75,3 +79,23 @@ uuid ของกลุ่ม: `SELECT uuid, name FROM chat_group WHERE name LIK
 - `available_date` = `YYYY-MM-DD` เฉพาะเมื่อแปลงจากคำพูดเจ้าของได้ (ไม่ได้ = อยู่ใน `note`)
 - ห้องจากแชท: มี `via_chat: true`, `chat_group_uuid`, `asset_uuid` ติดมาด้วย (backend ไม่ต้องใช้)
 - ฟิลด์อื่นที่ส่งมาด้วย (backend ไม่ใช้ก็ได้): `summary`, `outcome`, `accepts_foreigners`, `owner_agreed_profile`, `owner_price`, `available_text`, `attempt`
+
+## กลุ่ม "Check ทรัพย์ใหม่" — พิมพ์เบอร์ + ชื่อคอนโด
+
+กลุ่มใน `AI_CALL_TEXT_GROUPS`: ทุกข้อความที่พิมพ์ในแชทเว็บ (PostText) ถ้ามีเบอร์โทร → ส่งให้ AI โทรทันที (1 บรรทัดที่มีเบอร์ = 1 ห้อง)
+
+| ข้อความ | อ่านได้ |
+|---|---|
+| `0812345678 Ideo Mobi Asoke 15000` | เบอร์ 0812345678 · Ideo Mobi Asoke · 15,000 |
+| `Ideo Mobi Asoke 081-234-5678 ราคา 15,000 บาท` | เบอร์ 0812345678 · Ideo Mobi Asoke · 15,000 |
+| `ไอดีโอ โมบิ อโศก` ↵ `โทร 089 123 4567` | เบอร์ 0891234567 · ไอดีโอ โมบิ อโศก (ชื่อจากบรรทัดก่อน) |
+| `Life Asoke 12k 0923334444` | 0923334444 · Life Asoke · 12,000 |
+| `เบอร์ 0812345678` (ไม่มีชื่อ) / ไม่มีเบอร์ | ไม่ส่ง |
+
+id ที่ส่ง = `msg-<message id>-<ลำดับ>` (ยังไม่มีในหลังบ้าน) → `/ai-call/calling` และ `/ai-call/results` ของ id แบบนี้จะ**ตั้งปุ่มสถานะใต้ข้อความ**แทนการแก้สถานะห้อง:
+
+- เริ่มโทร → ชั้นติดต่อ = กำลังโทร
+- ติดต่อได้ → ชั้นติดต่อ = โทรแล้ว · ชั้นผล = ว่าง / ไม่ว่าง
+- ติดต่อไม่ได้ → ล้างชั้นติดต่อ (= ยังไม่ได้โทร)
+
+ปุ่มใต้ข้อความแสดงเมื่อกลุ่มเปิด **call_buttons** (เปิดที่หน้าจัดการกลุ่ม) · ข้อความที่มาจาก LINE (mirror) ยังไม่ส่ง

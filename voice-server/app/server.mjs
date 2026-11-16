@@ -267,7 +267,7 @@ const KINDS = {
   date: 'ว่างวันที่เท่าไหร่ → intent: "answered" | "unclear" · available_from = วันที่ตามที่เจ้าของพูด',
   month: 'เดือนไหน → intent: "answered" | "unclear" · available_from = เดือนตามที่เจ้าของพูด',
   price: 'ราคาห้องตามที่บอทพูดถูกไหม → intent: "yes" | "no" | "unclear" · ถ้าเจ้าของบอกราคาใหม่ ใส่ owner_price (ตัวเลขบาท)',
-  foreign: 'เจ้าของรับลูกค้าต่างชาติไหม → intent: "yes" | "no" | "unclear" · asks_nationality = true ถ้าเจ้าของถามกลับว่าผู้เช่า/ลูกค้าชาติไหน',
+  foreign: 'เจ้าของรับลูกค้าต่างชาติไหม → intent: "yes" (รับ) | "no" (ไม่รับ/เฉพาะคนไทย) | "ask" (ยังไม่ตอบว่ารับไหม แต่ถามกลับว่าลูกค้าชาติไหน เช่น "ชาติไหน" "คนที่ไหน") | "unclear" · asks_nationality = true ถ้าเจ้าของถามว่าผู้เช่า/ลูกค้าชาติไหน (ทั้งกรณี ask และ yes)',
   rules: 'บอทเพิ่งอธิบายกฎตรวจห้องของบริษัท เจ้าของเปลี่ยนใจรับลูกค้าต่างชาติไหม → intent: "yes" (โอเค/รับได้/ถ้าแบบนี้รับ) | "no" (ยังไม่รับ/รับแต่คนไทย) | "unclear" (แค่รับฟัง เช่น ค่ะ ครับ อืม)',
   profile: 'ให้แอดมินส่งโปรไฟล์ลูกค้าให้พิจารณาก่อนดีไหม → intent: "yes" (ได้/ส่งมาได้/ลองดู) | "no" (ไม่ต้อง/ไม่รับ/ไม่สนใจ) | "unclear"',
 };
@@ -335,7 +335,8 @@ async function runFlow(s) {
   const ask = async (kind, q, say, retryUnclear = false) => {
     s.qStart = Date.now(); await say();
     let a = await L(kind, null, q);
-    if (!s.gone && (a.intent === "silent" || (retryUnclear && a.intent === "unclear"))) { s.qStart = Date.now(); await say(); a = await L(kind, null, `${q} (ถามซ้ำ)`); }
+    const again = typeof retryUnclear === "function" ? retryUnclear(a) : retryUnclear && a.intent === "unclear";
+    if (!s.gone && (a.intent === "silent" || again)) { s.qStart = Date.now(); await say(); a = await L(kind, null, `${q} (ถามซ้ำ)`); }
     return a;
   };
   const live = (s.live = { outcome: "unclear", ready_now: null, available_from: null, price_confirmed: null, owner_price: null, accepts_foreigners: null, owner_agreed_profile: null, nationality_told: null, accepted_after_rules: null });
@@ -376,20 +377,36 @@ async function runFlow(s) {
   // ต่างชาติ
   const snd = (k) => s.snd[k] ?? null; // ท่อนสัญชาติ/อธิบายกฎ: เล่นเมื่อมีไฟล์เสียง
   const bye = () => (s.on("09") ? P("09") : P("02B")); // "ขอบคุณค่ะ" (ไม่มีไฟล์ 09 → ใช้ 02B)
+  const askedNat = (a) => a.intent === "ask" || !!a.asks_nationality || /ชาติ(ไหน|อะไร)|สัญชาติ|ประเทศไหน|คนที่ไหน|คนชาติ/.test(String(a.text ?? "").replace(/\s+/g, ""));
   let f = { intent: "unclear" };
   if (s.on("05")) {
-    f = await ask("foreign", Q("05"), () => P("05"), true);
+    // ฟังไม่ออก → ถามซ้ำ · แต่ถ้าเจ้าของถามกลับว่าชาติไหน ไม่ต้องถามซ้ำ ให้บอกสัญชาติเลย
+    f = await ask("foreign", Q("05"), () => P("05"), (a) => a.intent === "unclear" && !askedNat(a));
   }
   if (f.intent === "hangup" || s.gone) return;
+  // เจ้าของถามว่าผู้เช่าชาติไหน → บอกสัญชาติ (มีชุด A และ B สุ่มเลือก 1 ชุด)
+  let natTold = false;
+  const tellNationality = async () => {
+    if (natTold) return;
+    natTold = true;
+    const opts = ["06A", "06B"].filter((k) => snd(k));
+    const pick = opts[Math.floor(Math.random() * opts.length)];
+    if (pick) { live.nationality_told = Q(pick); log(s.callId, "nationality", pick); await play(s, s.snd[pick]); }
+  };
+  // ถามกลับว่าชาติไหน แต่ยังไม่บอกว่ารับไหม → บอกสัญชาติ แล้วรอฟังว่ารับไหม (เงียบ → ถาม 05 ซ้ำ)
+  if (f.intent !== "yes" && f.intent !== "no" && askedNat(f)) {
+    s.qStart = Date.now();
+    await tellNationality();
+    if (s.gone) return;
+    let g = await L("foreign", null, "หลังบอกสัญชาติลูกค้า เจ้าของรับไหม");
+    if (!s.gone && ["silent", "unclear", "ask"].includes(g.intent)) g = await ask("foreign", Q("05"), () => P("05"));
+    if (g.intent === "hangup" || s.gone) return;
+    f = g;
+  }
   if (f.intent === "yes") {
     live.accepts_foreigners = true;
     live.outcome = "avail_ok";
-    // เจ้าของถามว่าผู้เช่าชาติไหน → บอกสัญชาติ (มีทั้งชุด A และ B สุ่มเลือก 1 ชุด)
-    if (f.asks_nationality) {
-      const opts = ["06A", "06B"].filter((k) => snd(k));
-      const pick = opts[Math.floor(Math.random() * opts.length)];
-      if (pick) { live.nationality_told = Q(pick); log(s.callId, "nationality", pick); await play(s, s.snd[pick]); }
-    }
+    if (askedNat(f)) await tellNationality();
     // "ขอบคุณค่ะ เดี๋ยวแอดมินจะส่งโปรไฟล์ลูกค้าให้พิจารณาค่ะ"
     if (s.on("09A")) await P("09A");
     else { await P("08"); await bye(); }
