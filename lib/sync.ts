@@ -39,7 +39,11 @@ export function buildResultPayload(call: any, lead: any, sentAt = new Date().toI
   const willRetry = call.to_status === "noanswer" || call.to_status === "unclear" || call.to_status === "callback";
   // วันที่ว่างตามที่เจ้าของพูด → YYYY-MM-DD (API รับแค่รูปแบบนี้) แปลไม่ได้ = ใส่เป็นข้อความใน note
   const availText: string | null = a.available_from ? String(a.available_from) : null;
-  const availDate = status === "ว่าง" ? thaiDateToISO(availText) : null;
+  // ว่าง: วันที่ที่เจ้าของบอก หรือ "พร้อมเข้าอยู่เลย" = วันนี้ · ไม่ว่าง: วันที่คาดว่าจะว่าง (ถ้าบอก)
+  // ไม่ได้บอกเลย = ไม่ส่ง → เว็บคงวันที่เดิมของห้องไว้ (ห้องยังไม่มีวันที่ = เว็บใส่วันนี้ให้)
+  const availDate = status
+    ? thaiDateToISO(availText) ?? (status === "ว่าง" && a.ready_now === true ? thaiDateToISO("วันนี้") : null)
+    : null;
   const extra = [
     status === "ว่าง" && availText && !availDate ? `ว่าง: ${availText}` : "",
     a.owner_price ? `เจ้าของแจ้งราคา ${Number(a.owner_price).toLocaleString("en-US")} บาท` : "",

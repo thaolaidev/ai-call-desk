@@ -30,8 +30,14 @@ export async function matchCondo(db: SupabaseClient, typed: string): Promise<Con
   // หาผู้สมัครจากคำที่ยาวที่สุด 2 คำ (เร็ว ไม่ต้องดึงทั้งคลัง)
   const keys = [...ws].sort((x, y) => y.length - x.length).slice(0, 2).filter((w) => w.length >= 3);
   if (!keys.length) return null;
-  const or = keys.map((k) => `condo.ilike.%${k.replace(/[%_,()]/g, "")}%`).join(",");
-  const { data } = await db.from("condo_audio").select("condo, condo_id, path").or(or).limit(300);
+  const clean = (k: string) => k.replace(/[%_,()]/g, "");
+  // ต้องมีทุกคำหลักก่อน (แคบ แม่น) · ไม่เจอค่อยหาแบบคำใดคำหนึ่ง
+  let q = db.from("condo_audio").select("condo, condo_id, path");
+  for (const k of keys) q = q.ilike("condo", `%${clean(k)}%`);
+  let { data } = await q.limit(300);
+  if (!data?.length) {
+    ({ data } = await db.from("condo_audio").select("condo, condo_id, path").or(keys.map((k) => `condo.ilike.%${clean(k)}%`).join(",")).limit(500));
+  }
   // คะแนนเท่ากัน: เลือกแถวจากคลัง (มี condo_id) ก่อน แล้วค่อยแถวที่มีเสียงแล้ว
   const rank = (x: { condo_id: unknown; path: unknown }) => (x.condo_id ? 2 : 0) + (x.path ? 1 : 0);
   let best: (CondoMatch & { rank: number }) | null = null;
