@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ingestLeads } from "@/lib/ingest";
 import { dispatchChat } from "@/lib/chat";
 import { normalizePhone } from "@/lib/phone";
+import { matchCondo } from "@/lib/condomatch";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -29,6 +30,15 @@ export async function POST(req: NextRequest) {
   const mode = s?.chat_mode ?? (s?.chat_enabled === false ? "off" : "auto");
   if (!s || mode === "off") return NextResponse.json({ error: "ปิดรับห้องจากแชทไว้ที่หน้าห้องโทร" }, { status: 503 });
   const recallMs = (s.chat_recall_hours ?? 12) * 3600_000;
+
+  // ชื่อคอนโดที่ไม่มี condo_id (เช่นแอดมินพิมพ์ "Ideo mobi Asoke") → จับคู่กับคลังชื่อคอนโด ใช้ชื่อเต็ม + id ในคลัง
+  // จะได้อ่านชื่อไทยที่ถูกต้อง · จับคู่ไม่ได้ = ใช้ชื่อตามที่พิมพ์
+  for (const r of rooms) {
+    const typed = String(r?.condo_name ?? r?.condo ?? "").trim();
+    if (!typed || r?.condo_id || r?.location_id) continue;
+    const m = await matchCondo(db, typed).catch(() => null);
+    if (m) Object.assign(r, { condo_name: m.condo, condo: undefined, condo_id: m.condo_id, typed_condo: typed });
+  }
 
   const result: { asset_uuid: string | null; id: string | null; state: "queued" | "skipped"; reason?: string; last_result?: string | null }[] = [];
   const accept: any[] = [];
