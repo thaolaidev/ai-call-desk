@@ -9,7 +9,7 @@ import { bkkClock, todayRangeBKK, toMinutes } from "./time";
 import { syncPending } from "./sync";
 import { fillMissingCondoAudio } from "./botnoi";
 import { fillMissingPriceAudio } from "./priceaudio";
-import { dispatchChat, prepareAudio } from "./chat";
+import { dispatchChat, prepareAudio, pruneWaiting } from "./chat";
 
 const IN_FLIGHT = ["dialing", "ringing", "in_progress"];
 const STALE_MIN = 15; // สายที่ค้างนานเกินนี้ถือว่าล้มเหลว (เช่น webhook ไม่มา)
@@ -60,7 +60,9 @@ export async function tick(): Promise<TickReport> {
   await fillMissingCondoAudio(db, 2).catch(() => null);
   await fillMissingPriceAudio(db, 2).catch(() => null);
 
-  // 1e) ห้องที่ส่งมาจากแชท: โทรทันทีโดยไม่ต้องเปิดห้องโทร
+  // 1e) ห้องที่ทีมโทรเองแล้วในแชท → เอาออกจากคิว (ทำงานร่วมกับคน)
+  await pruneWaiting(db, s).catch(() => 0);
+  // 1f) ห้องที่ส่งมาจากแชท: โทรทันทีโดยไม่ต้องเปิดห้องโทร
   const chat = await dispatchChat(db, s).catch((e) => ({ started: 0, errors: [e instanceof Error ? e.message : String(e)] }));
   report.started += chat.started;
   report.errors.push(...chat.errors.map((e) => `โทรจากแชท: ${e}`));

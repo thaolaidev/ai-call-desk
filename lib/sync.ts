@@ -110,6 +110,28 @@ export async function notifyCalling(lead: any, call?: { chat_group_uuid?: string
   }).catch(() => null);
 }
 
+/**
+ * ถามเว็บเท่าไหร่ว่าคนในทีมโทร/กดสถานะห้องเหล่านี้ไปแล้วหรือยัง (POST {VPS_API_URL}/check)
+ * คืน Map id → { status, by } เฉพาะห้องที่ทีมจัดการแล้ว · เรียกไม่ได้ = Map ว่าง (โทรต่อตามปกติ)
+ */
+export async function checkHandled(items: { id: string; since_seconds: number }[]) {
+  const done = new Map<string, { status: string; by: string }>();
+  const t = target();
+  if (!t?.key || !items.length) return done;
+  try {
+    const res = await fetch(`${vpsBase()}/check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": t.key },
+      body: JSON.stringify({ items }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return done;
+    const json = await res.json();
+    for (const r of json?.data?.items ?? json?.items ?? []) if (r?.handled) done.set(String(r.id), { status: String(r.status ?? ""), by: String(r.by ?? "") });
+  } catch { /* เว็บไม่ตอบ = ไม่ตัดห้องออก */ }
+  return done;
+}
+
 export function sign(secret: string, timestamp: string, body: string) {
   return "sha256=" + createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
 }

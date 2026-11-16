@@ -4,7 +4,7 @@ import { vapiProvider } from "./providers/vapi";
 import { yalecomProvider } from "./providers/yalecom";
 import { sipProvider } from "./providers/sip";
 import { bkkClock, toMinutes, todayRangeBKK } from "./time";
-import { notifyCalling } from "./sync";
+import { notifyCalling, checkHandled } from "./sync";
 import { findCondoAudio } from "./condolib";
 import { ensureCondoAudio, defaultReading } from "./botnoi";
 import { findPriceAudio, ensurePriceAudio } from "./priceaudio";
@@ -53,6 +53,47 @@ export function outsideHours(s: any): string | null {
   return null;
 }
 
+const HANDLED_LABEL: Record<string, string> = {
+  calling: "กำลังโทร", called: "โทรแล้ว", unreachable: "ติดต่อไม่ได้", line: "ทักไลน์", facebook: "ทักเฟส",
+  available: "ว่าง", unavailable: "ไม่ว่าง", waiting: "รอตอบ", agent: "Ag",
+};
+
+/**
+ * ทำงานร่วมกับทีม: ห้องที่คนในทีมกดโทร/กดสถานะในแชทไปแล้ว (หลังส่งมา หรือภายใน "ไม่โทรซ้ำภายใน" ชม.) → เอาออกจากคิว ไม่ให้ AI โทรซ้ำ
+ * คืน id ของลีดที่เอาออก
+ */
+export async function pruneHandled(db: SupabaseClient, s: any, leads: any[]): Promise<Set<string>> {
+  const removed = new Set<string>();
+  const list = leads.filter((l) => l.external_id && l.chat_requested_at);
+  if (!list.length) return removed;
+  const recallMs = (s?.chat_recall_hours ?? 12) * 3600_000;
+  const items = list.map((l) => ({
+    id: String(l.external_id),
+    since_seconds: Math.ceil((Date.now() - (Date.parse(l.chat_requested_at) - recallMs)) / 1000),
+  }));
+  const done = await checkHandled(items);
+  for (const l of list) {
+    const h = done.get(String(l.external_id));
+    if (!h) continue;
+    removed.add(l.id);
+    await db.from("leads").update({
+      status: "new", chat_requested_at: null, next_call_at: null,
+      last_summary: `ทีมจัดการเองแล้ว (${HANDLED_LABEL[h.status] ?? h.status}${h.by ? ` · ${h.by}` : ""}) — AI ไม่โทร`,
+    }).eq("id", l.id);
+  }
+  return removed;
+}
+
+let lastPrune = 0;
+/** ทุก tick และทุก 30 วินาทีจาก server เสียง (ไม่ถี่กว่า 30 วินาที): เช็กห้องที่รอในคิวจากแชท แล้วเอาห้องที่ทีมโทรเองแล้วออก (ทุกโหมด) */
+export async function pruneWaiting(db: SupabaseClient, s?: any, minGapMs = 30_000) {
+  if (Date.now() - lastPrune < minGapMs) return 0;
+  lastPrune = Date.now();
+  const { data } = await db.from("leads").select("id, external_id, chat_requested_at")
+    .not("chat_requested_at", "is", null).in("status", ["queued", "noanswer", "unclear", "callback"]).limit(100);
+  return (await pruneHandled(db, s, data ?? [])).size;
+}
+
 /**
  * โทรห้องที่ส่งมาจากแชท แยกตามห้องโทร (new = Check ทรัพย์ใหม่ · old = Check สถานะห้อง)
  * แต่ละห้อง: โหมดโทรทันทีเท่านั้น · ไม่เกินจำนวนสายพร้อมกันและเป้าต่อวันของห้องนั้น
@@ -92,10 +133,12 @@ async function dispatchRoom(db: SupabaseClient, s: any, room: any): Promise<{ st
 
   const { data: leads, error: ce } = await db.rpc("claim_chat_leads", { p_limit: slots, p_segment: room.segment });
   if (ce) return { started: 0, errors: [ce.message] };
+  // ห้องที่ทีมโทรเองแล้ว → เอาออก ไม่โทร
+  const handled = await pruneHandled(db, s, leads ?? []);
 
   const provider = providerOf(s.provider);
   let started = 0;
-  for (const lead of leads ?? []) {
+  for (const lead of (leads ?? []).filter((l: any) => !handled.has(l.id))) {
     const { data: call, error } = await db
       .from("calls")
       .insert({

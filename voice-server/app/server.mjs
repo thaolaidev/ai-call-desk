@@ -495,6 +495,18 @@ async function finish(s) {
   await unlink(`${CFG.recDir}/rx-${s.callId}.wav`).catch(() => {});
 }
 
+// ---------- ชีพจรถึงเว็บทุก 30 วินาที ----------
+// ให้เว็บเช็กห้องที่ทีมโทรเองแล้วในแชท (เอาออกจากคิว) และเติมสายห้องที่เปิดโทรทันที — ไม่ต้องรอ cron ทุกนาที
+if (CFG.resultUrl && CFG.secret) {
+  const beatUrl = new URL("/api/voice/heartbeat", CFG.resultUrl).toString();
+  setInterval(() => {
+    fetch(beatUrl, { method: "POST", headers: { "x-voice-secret": CFG.secret }, signal: AbortSignal.timeout(25_000) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (j && (j.pruned || j.started)) log("heartbeat", `pruned ${j.pruned} · started ${j.started}`); })
+      .catch(() => {});
+  }, 30_000);
+}
+
 // ---------- รับคำสั่งโทรจากเว็บ ----------
 async function startCall(body) {
   const callId = String(body.call_id ?? "").replace(/[^\w-]/g, "");
