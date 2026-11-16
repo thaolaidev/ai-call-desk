@@ -25,9 +25,9 @@ export default async function Dashboard() {
     sb.from("admin_tasks").select("id, note, created_at, leads(condo, unit, rent, owner_name, phone)").eq("status", "open").order("created_at", { ascending: false }).limit(8),
     sb.rpc("lead_counts"),
   ]);
-  const { data: rooms } = await sb.from("call_rooms").select("segment, name, running, daily_cap");
+  const { data: rooms } = await sb.from("call_rooms").select("segment, name, running, daily_cap, chat_mode");
   const cap = (rooms ?? []).reduce((a: number, r: any) => a + (r.daily_cap ?? 0), 0) || (settings.data?.daily_cap ?? 200);
-  const anyRunning = (rooms ?? []).some((r: any) => r.running);
+  const anyRunning = (rooms ?? []).some((r: any) => r.chat_mode === "auto");
 
   if (settings.error) {
     return (
@@ -65,7 +65,7 @@ export default async function Dashboard() {
     <>
       <Top title="แดชบอร์ด" sub="ภาพรวมการโทรวันนี้">
         {(rooms ?? []).map((r: any) => (
-          <span key={r.segment} className="chip"><span className={`dot ${r.running ? "live" : ""}`} />{r.name}: {r.running ? "กำลังโทร" : "หยุด"}</span>
+          <span key={r.segment} className="chip"><span className={`dot ${r.chat_mode === "auto" ? "live" : ""}`} />{r.name}: {r.chat_mode === "auto" ? "โทรทันที" : r.chat_mode === "off" ? "ปิดรับ" : "รอกดโทร"}</span>
         ))}
         <Link className="btn primary" href="/calling">ไปห้องโทร</Link>
       </Top>

@@ -27,8 +27,14 @@ export async function POST(req: NextRequest) {
 
   const db = createAdminClient();
   const { data: s } = await db.from("settings").select("*").eq("id", 1).single();
-  const mode = s?.chat_mode ?? (s?.chat_enabled === false ? "off" : "auto");
-  if (!s || mode === "off") return NextResponse.json({ error: "ปิดรับห้องจากแชทไว้ที่หน้าห้องโทร" }, { status: 503 });
+  if (!s) return NextResponse.json({ error: "อ่าน settings ไม่ได้" }, { status: 500 });
+  // ห้องโทรตามกลุ่มแชท: Check ทรัพย์ใหม่ = new · Check สถานะห้อง = old (ไม่รู้กลุ่ม: ห้องจากข้อความ msg-… = new)
+  const { data: callRooms } = await db.from("call_rooms").select("segment, name, chat_mode, chat_group_uuid");
+  const isMsg = rooms.some((r) => String(r?.id ?? "").startsWith("msg-"));
+  const room: any = (callRooms ?? []).find((r: any) => r.chat_group_uuid && r.chat_group_uuid === group)
+    ?? (callRooms ?? []).find((r: any) => r.segment === (isMsg ? "new" : "old"));
+  const segment: "new" | "old" = room?.segment === "new" ? "new" : "old";
+  if ((room?.chat_mode ?? "queue") === "off") return NextResponse.json({ error: `ห้อง ${room?.name ?? segment} ปิดรับอยู่ (หน้าห้องโทร)` }, { status: 503 });
   const recallMs = (s.chat_recall_hours ?? 12) * 3600_000;
 
   // ชื่อคอนโดที่ไม่มี condo_id (เช่นแอดมินพิมพ์ "Ideo mobi Asoke") → จับคู่กับคลังชื่อคอนโด ใช้ชื่อเต็ม + id ในคลัง
@@ -77,7 +83,7 @@ export async function POST(req: NextRequest) {
       result.push({ asset_uuid: asset, id, state: "skipped", reason: `AI โทรไปแล้วเมื่อ ${new Date(l.last_called_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })}`, last_result: l.last_summary ?? null });
       continue;
     }
-    accept.push({ ...r, queue: true, source: "chat" });
+    accept.push({ ...r, queue: true, source: "chat", segment });
     result.push({ asset_uuid: asset, id, state: "queued" });
   }
 
@@ -109,7 +115,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const d = await dispatchChat(db, s);
+  const d = await dispatchChat(db, s, segment);
   return NextResponse.json({
     queued: result.filter((x) => x.state === "queued").length,
     started: d.started,

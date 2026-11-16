@@ -3,7 +3,7 @@ import { simulateProvider } from "./providers/simulate";
 import { vapiProvider } from "./providers/vapi";
 import { yalecomProvider } from "./providers/yalecom";
 import { sipProvider } from "./providers/sip";
-import { bkkClock, toMinutes } from "./time";
+import { bkkClock, toMinutes, todayRangeBKK } from "./time";
 import { notifyCalling } from "./sync";
 import { findCondoAudio } from "./condolib";
 import { ensureCondoAudio, defaultReading } from "./botnoi";
@@ -54,24 +54,43 @@ export function outsideHours(s: any): string | null {
 }
 
 /**
- * โทรห้องที่ส่งมาจากแชททันที (ไม่ต้องกดเริ่มห้องโทร) · ไม่เกิน chat_concurrency สายพร้อมกัน
+ * โทรห้องที่ส่งมาจากแชท แยกตามห้องโทร (new = Check ทรัพย์ใหม่ · old = Check สถานะห้อง)
+ * แต่ละห้อง: โหมดโทรทันทีเท่านั้น · ไม่เกินจำนวนสายพร้อมกันและเป้าต่อวันของห้องนั้น
  * เรียกตอนแชทส่งห้องมา, ทุก tick และทุกครั้งที่สายจากแชทจบ (ให้คิวถัดไปโทรต่อทันที)
  */
-export async function dispatchChat(db: SupabaseClient, s?: any): Promise<{ started: number; waiting?: string; errors: string[] }> {
-  const errors: string[] = [];
+export async function dispatchChat(db: SupabaseClient, s?: any, onlySegment?: string): Promise<{ started: number; waiting?: string; errors: string[] }> {
   if (!s) s = (await db.from("settings").select("*").eq("id", 1).single()).data;
   if (!s) return { started: 0, errors: ["อ่าน settings ไม่ได้"] };
-  const mode = s.chat_mode ?? (s.chat_enabled === false ? "off" : "auto");
-  if (mode === "off") return { started: 0, waiting: "ปิดรับห้องจากแชทอยู่", errors };
-  if (mode === "queue") return { started: 0, waiting: "ตั้งให้รอกดโทรเอง (เปิดโหมดโทรทันทีที่หน้าห้องโทร)", errors };
+  const { data: rooms } = await db.from("call_rooms").select("*").order("segment");
+  let started = 0;
+  const errors: string[] = [];
+  let waiting: string | undefined;
+  for (const room of (rooms ?? []).filter((r: any) => !onlySegment || r.segment === onlySegment)) {
+    const r = await dispatchRoom(db, s, room);
+    started += r.started;
+    errors.push(...r.errors);
+    if (r.waiting) waiting = r.waiting;
+  }
+  return { started, waiting, errors };
+}
+
+async function dispatchRoom(db: SupabaseClient, s: any, room: any): Promise<{ started: number; waiting?: string; errors: string[] }> {
+  const errors: string[] = [];
+  const mode = room.chat_mode ?? "queue";
+  if (mode === "off") return { started: 0, waiting: `ห้อง ${room.name} ปิดรับอยู่`, errors };
+  if (mode === "queue") return { started: 0, waiting: `ห้อง ${room.name} ตั้งให้รอกดโทรเอง`, errors };
   const off = outsideHours(s);
   if (off) return { started: 0, waiting: off, errors };
 
-  const { count: inflight } = await db.from("calls").select("id", { count: "exact", head: true }).eq("via_chat", true).in("state", IN_FLIGHT);
-  const slots = (s.chat_concurrency ?? 3) - (inflight ?? 0);
-  if (slots <= 0) return { started: 0, waiting: "สายเต็ม รอสายก่อนหน้าจบ", errors };
+  const { from, to } = todayRangeBKK();
+  const [{ count: inflight }, { count: today }] = await Promise.all([
+    db.from("calls").select("id", { count: "exact", head: true }).eq("via_chat", true).eq("segment", room.segment).in("state", IN_FLIGHT),
+    db.from("calls").select("id", { count: "exact", head: true }).eq("segment", room.segment).gte("started_at", from).lt("started_at", to),
+  ]);
+  const slots = Math.min((room.concurrency ?? 3) - (inflight ?? 0), (room.daily_cap ?? 100) - (today ?? 0));
+  if (slots <= 0) return { started: 0, waiting: (today ?? 0) >= (room.daily_cap ?? 100) ? `ห้อง ${room.name} ครบเป้าต่อวันแล้ว` : "สายเต็ม รอสายก่อนหน้าจบ", errors };
 
-  const { data: leads, error: ce } = await db.rpc("claim_chat_leads", { p_limit: slots });
+  const { data: leads, error: ce } = await db.rpc("claim_chat_leads", { p_limit: slots, p_segment: room.segment });
   if (ce) return { started: 0, errors: [ce.message] };
 
   const provider = providerOf(s.provider);

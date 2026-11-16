@@ -5,25 +5,24 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchChat } from "@/lib/chat";
 
-const CHAT_MODES = { auto: "รับห้องจากแชทแล้วโทรทันที", queue: "รับห้องเข้าคิว รอกดโทรเอง", off: "ปิดรับห้องจากแชท" } as const;
+const CHAT_MODES = { auto: "โทรทันที", queue: "รับเข้าคิว รอกดโทร", off: "ปิดรับ" } as const;
 
-/** ปุ่มเลือกโหมดห้องจากแชท (หน้าห้องโทร) · เปลี่ยนเป็น "โทรทันที" = เริ่มโทรห้องที่รออยู่เลย */
+/** ปุ่มเลือกโหมดของห้องโทร (หน้าห้องโทร) · เปลี่ยนเป็น "โทรทันที" = เริ่มโทรห้องที่รออยู่เลย */
 export async function setChatMode(formData: FormData) {
   const mode = String(formData.get("chat_mode")) as keyof typeof CHAT_MODES;
+  const segment = formData.get("segment") === "new" ? "new" : "old";
   if (!(mode in CHAT_MODES)) redirect("/calling?err=" + encodeURIComponent("โหมดไม่ถูกต้อง"));
   const supabase = await createClient();
-  const { error } = await supabase.from("settings").update({ chat_mode: mode, chat_enabled: mode !== "off" }).eq("id", 1);
-  if (error) redirect("/calling?err=" + encodeURIComponent(error.message.includes("chat_mode") ? "ยังไม่ได้รัน update_0016_chat_mode.sql" : error.message));
+  const { data: room, error } = await supabase.from("call_rooms").update({ chat_mode: mode, updated_at: new Date().toISOString() }).eq("segment", segment).select("name").single();
+  if (error) redirect("/calling?err=" + encodeURIComponent(error.message.includes("chat_mode") ? "ยังไม่ได้รัน update_0017_rooms.sql" : error.message));
   let note = "";
   if (mode === "auto") {
-    const d = await dispatchChat(createAdminClient()).catch((e) => ({ started: 0, waiting: undefined, errors: [String(e)] }));
+    const d = await dispatchChat(createAdminClient(), undefined, segment).catch((e) => ({ started: 0, waiting: undefined, errors: [String(e)] }));
     note = d.started ? ` · เริ่มโทร ${d.started} สาย` : d.waiting ? ` · ${d.waiting}` : "";
   }
   revalidatePath("/calling");
-  revalidatePath("/settings");
-  redirect("/calling?saved=" + encodeURIComponent(CHAT_MODES[mode] + note));
+  redirect("/calling?saved=" + encodeURIComponent(`${room?.name ?? ""}: ${CHAT_MODES[mode]}${note}`));
 }
-
 export async function updateCampaign(formData: FormData) {
   const supabase = await createClient();
   const days = formData.getAll("call_days").map(Number);
@@ -39,11 +38,8 @@ export async function updateCampaign(formData: FormData) {
       stale_days: Math.min(365, Math.max(1, Number(formData.get("stale_days")) || 30)),
       new_days: Math.min(90, Math.max(1, Number(formData.get("new_days")) || 7)),
       sync_every_min: Math.min(1440, Math.max(5, Number(formData.get("sync_every_min")) || 30)),
-      ...(formData.has("chat_concurrency")
-        ? {
-            chat_concurrency: Math.min(6, Math.max(1, Number(formData.get("chat_concurrency")) || 3)),
-            chat_recall_hours: Math.min(720, Math.max(0, Number(formData.get("chat_recall_hours") ?? 12))),
-          }
+      ...(formData.has("chat_recall_hours")
+        ? { chat_recall_hours: Math.min(720, Math.max(0, Number(formData.get("chat_recall_hours") ?? 12))) }
         : {}),
     })
     .eq("id", 1);
@@ -67,6 +63,7 @@ const WAITING = ["queued", "noanswer", "unclear", "callback"];
 export async function removeChatQueued(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   const all = formData.get("all") === "1";
+  const segment = formData.get("segment") === "new" ? "new" : formData.get("segment") === "old" ? "old" : null;
   if (!id && !all) redirect("/calling?err=" + encodeURIComponent("ไม่พบห้องที่จะลบ"));
   const supabase = await createClient();
   let q = supabase
@@ -75,6 +72,7 @@ export async function removeChatQueued(formData: FormData) {
     .not("chat_requested_at", "is", null)
     .in("status", WAITING);
   if (!all) q = q.eq("id", id);
+  else if (segment) q = q.eq("segment", segment);
   const { data, error } = await q.select("id");
   if (error) redirect("/calling?err=" + encodeURIComponent(error.message));
   revalidatePath("/calling");

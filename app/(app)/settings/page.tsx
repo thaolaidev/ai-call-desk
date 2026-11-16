@@ -71,7 +71,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <div className="card-b form-grid">
             {["new", "old"].map((seg) => (
               <div key={seg} className="field" style={{ gridColumn: "span 1" }}>
-                <label>{seg === "new" ? "ห้องทรัพย์ใหม่" : "ห้องทรัพย์เดิม · อัปเดต"}: สายพร้อมกัน / เป้าต่อวัน</label>
+                <label>ห้อง {room(seg).name ?? (seg === "new" ? "Check ทรัพย์ใหม่" : "Check สถานะห้อง")}: สายพร้อมกัน / เป้าต่อวัน</label>
                 <div style={{ display: "flex", gap: 8 }}>
                   <input name={`concurrency_${seg}`} type="number" min={0} max={10} defaultValue={room(seg).concurrency ?? 3} aria-label="สายพร้อมกัน" style={{ width: "50%" }} />
                   <input name={`daily_cap_${seg}`} type="number" min={0} defaultValue={room(seg).daily_cap ?? 100} aria-label="เป้าต่อวัน" style={{ width: "50%" }} />
@@ -94,7 +94,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               </div>
             </fieldset>
             <label className="toggle"><input type="checkbox" name="auto_queue" defaultChecked={s.auto_queue} />ส่งห้องใหม่เข้าคิวอัตโนมัติ</label>
-            <div className="field"><label htmlFor="chat_concurrency">โทรจากแชท: สายพร้อมกัน</label><input id="chat_concurrency" name="chat_concurrency" type="number" min={1} max={6} defaultValue={s.chat_concurrency ?? 3} /></div>
             <div className="field"><label htmlFor="chat_recall_hours">โทรจากแชท: ห้องที่ AI เพิ่งโทร ไม่โทรซ้ำภายใน (ชั่วโมง)</label><input id="chat_recall_hours" name="chat_recall_hours" type="number" min={0} max={720} defaultValue={s.chat_recall_hours ?? 12} /></div>
 
           </div>
