@@ -33,7 +33,21 @@ const FAIL_NOTE: Record<string, string> = {
  * - ติดต่อได้: status = ว่าง/ไม่ว่าง และ status_updated_at = เวลาที่ยิงกลับ → VPS เขียนทับสถานะ + วันที่อัปเดตล่าสุด
  * - ติดต่อไม่ได้: status = "ติดต่อไม่ได้", status_updated_at = null → VPS คงสถานะเดิม บันทึกแค่ประวัติโทร + note
  */
-export function buildResultPayload(call: any, lead: any, sentAt = new Date().toISOString()) {
+/** หมายเหตุตอนติดต่อไม่ได้ เช่น "ไม่รับสาย (ครั้งที่ 1/3) · AI จะโทรซ้ำ 10:38" — ขึ้นบนการ์ด/ปุ่มในแชท */
+function failNote(call: any, lead: any, willRetry: boolean, max?: number | null) {
+  const what = call.outcome === "noanswer" ? "ไม่รับสาย" : FAIL_NOTE[call.outcome] ?? "โทรแล้วติดต่อไม่ได้";
+  const nth = `ครั้งที่ ${call.attempt ?? 1}${max ? `/${max}` : ""}`;
+  const at = lead?.next_call_at ? new Date(lead.next_call_at) : null;
+  const when = at && !isNaN(+at)
+    ? at.toLocaleString("th-TH", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", ...(at.toDateString() !== new Date().toDateString() ? { day: "numeric", month: "short" } : {}) })
+    : null;
+  const next = willRetry
+    ? `AI จะโทรซ้ำ${when ? ` ${when}` : "อัตโนมัติ"}`
+    : call.outcome === "dnc" ? "" : call.outcome === "noanswer" || call.outcome === "unclear" ? "ครบจำนวนครั้งแล้ว AI ไม่โทรซ้ำ" : "";
+  return [`${what} (${nth})`, next].filter(Boolean).join(" · ");
+}
+
+export function buildResultPayload(call: any, lead: any, sentAt = new Date().toISOString(), maxAttempts?: number | null) {
   const a = (call.analysis ?? {}) as Record<string, any>;
   const status = VPS_STATUS[call.outcome] ?? null;
   const willRetry = call.to_status === "noanswer" || call.to_status === "unclear" || call.to_status === "callback";
@@ -51,7 +65,7 @@ export function buildResultPayload(call: any, lead: any, sentAt = new Date().toI
   ].filter(Boolean).join(" · ");
   const note = status
     ? [call.summary, extra].filter(Boolean).join(" · ") || null
-    : `${FAIL_NOTE[call.outcome] ?? "โทรแล้วติดต่อไม่ได้"} (ครั้งที่ ${call.attempt})${willRetry ? " ระบบจะโทรใหม่อัตโนมัติ" : call.outcome === "dnc" ? "" : " รอดึงมาโทรใหม่รอบหน้า"}`;
+    : failNote(call, lead, willRetry, maxAttempts);
   return {
     event: "call.completed",
     delivery_id: call.id,
@@ -151,7 +165,8 @@ export async function deliverResult(db: SupabaseClient, callId: string) {
   }
 
   const sentAt = new Date().toISOString();
-  const payload = buildResultPayload(call, lead, sentAt);
+  const { data: st } = await db.from("settings").select("max_attempts").eq("id", 1).maybeSingle();
+  const payload = buildResultPayload(call, lead, sentAt, st?.max_attempts ?? null);
   const body = JSON.stringify(payload);
   const ts = String(Math.floor(Date.now() / 1000));
   const attempts = (call.sync_attempts ?? 0) + 1;
