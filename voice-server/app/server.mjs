@@ -686,21 +686,24 @@ const LABEL_RE = (k) => new RegExp(`^[ \\t]*(?:${k})[ \\t]*\\d*[ \\t]*[:：][ \\
 export function parseLabeled(text) {
   const s = String(text ?? "").replace(/\r/g, "");
   const project = LABEL_RE("project|โครงการ|คอนโด").exec(s)?.[1]?.trim();
-  const phoneLine = LABEL_RE("phone|tel|เบอร์").exec(s)?.[1] ?? "";
-  if (!project && !phoneLine) return null; // ไม่ใช่ฟอร์มนี้
+  // Phone / Phone 1 / Phone 2 / Tel / เบอร์ — รวมทุกบรรทัด (เบอร์แรก = โทรก่อน เบอร์ที่สอง = สำรอง)
+  const phoneRe = new RegExp(LABEL_RE("phone|tel|เบอร์").source, "gim");
+  const phoneLine = [...s.matchAll(phoneRe)].map((x) => x[1]).join(" ");
+  if (!project && !phoneLine.trim()) return null; // ไม่ใช่ฟอร์มนี้
   const priceLine = LABEL_RE("price|ราคา").exec(s)?.[1] ?? "";
   const petLine = (LABEL_RE("pet|สัตว์เลี้ยง").exec(s)?.[1] ?? "").trim().toLowerCase();
   const m = priceLine.match(/(\d{1,3}(?:,\d{3})+|\d{4,7})|(\d{1,3}(?:\.\d)?)\s*k\b/i);
   const price = m ? (m[1] ? Number(m[1].replace(/,/g, "")) : Number(m[2]) * 1000) : null;
-  const pet = /^(yes|y|ได้|ok|✅|✔)/.test(petLine) ? true : /^(no|n|ไม่|❌|✖)/.test(petLine) ? false : null;
+  // Pet : ใช่ / ไม่ / ไม่แน่ใจ (ไม่แน่ใจ หรือเว้นว่าง = บอทถามเองในสาย)
+  const pet = /^(ไม่แน่ใจ|ไม่รู้|ไม่ทราบ|\?|unsure|not\s*sure)/.test(petLine) ? null
+    : /^(yes|y|ใช่|ได้|รับ|ok|✅|✔)/.test(petLine) ? true
+    : /^(no|n|ไม่|❌|✖)/.test(petLine) ? false : null;
   const condo = (project ?? "").replace(/[•|]+/g, " ").replace(/\s+/g, " ").trim();
   if (!condo) return [];
-  const out = [];
-  for (const raw of phoneLine.match(TXT_PHONE) ?? []) {
-    const phone = normPhone(raw);
-    if (phone && !out.some((r) => r.phone === phone)) out.push({ phone, condo, price: price && price >= 1000 ? price : null, pet });
-  }
-  return out;
+  // ห้องเดียว: โทรเบอร์แรก ไม่ติด/ไม่รับ/ไม่ใช่เจ้าของ → ระบบสลับไปโทรเบอร์สำรองให้เอง
+  const phones = [...new Set((phoneLine.match(TXT_PHONE) ?? []).map(normPhone).filter(Boolean))];
+  if (!phones.length) return [];
+  return [{ phone: phones[0], alt_phone: phones[1] ?? null, condo, price: price && price >= 1000 ? price : null, pet }];
 }
 
 export function parseRoomsText(text) {
@@ -798,14 +801,14 @@ if (CAP.db && CAP.groups.length && CAP.key && CAP.push) {
           if (rooms.length) {
             // อัลบั้มหลายรูป: ปุ่มสถานะในแชทอยู่ใต้ "รูปสุดท้าย" ของอัลบั้ม (คำบรรยายอยู่รูปแรก) → ผูกกับรูปสุดท้าย
             const target = m.kind === "attachment" ? await albumLast(pool, m).catch(() => Number(m.id)) : Number(m.id);
-            const payload = rooms.map((r, i) => ({ id: `msg-${target}-${i + 1}`, condo_name: r.condo, phone: r.phone, message_id: target, ...(r.price != null ? { price: r.price } : {}), ...(r.pet != null ? { pet_friendly: r.pet } : {}) }));
+            const payload = rooms.map((r, i) => ({ id: `msg-${target}-${i + 1}`, condo_name: r.condo, phone: r.phone, message_id: target, ...(r.price != null ? { price: r.price } : {}), ...(r.pet != null ? { pet_friendly: r.pet } : {}), ...(r.alt_phone ? { alt_phone: r.alt_phone } : {}) }));
             const res = await fetch(CAP.push, {
               method: "POST", headers: { "Content-Type": "application/json", "X-API-Key": CAP.key },
               body: JSON.stringify({ group_uuid: m.group_uuid, requested_by: m.by_name ?? "ผู้ใช้", rooms: payload }),
               signal: AbortSignal.timeout(45_000),
             }).catch((e) => ({ ok: false, status: 0, text: async () => e.message }));
             const j = res.ok ? await res.json().catch(() => ({})) : null;
-            log("caption push", m.id, rooms.map((r) => `${r.phone} ${r.condo}`).join(" | "), res.ok ? `queued ${j?.queued ?? 0} started ${j?.started ?? 0}${j?.waiting ? ` (${j.waiting})` : ""}${(j?.rooms ?? []).filter((x) => x.state === "skipped").map((x) => ` · ข้าม: ${x.reason}`).join("")}` : `ERR ${res.status} ${(await res.text().catch(() => "")).slice(0, 120)}`);
+            log("caption push", m.id, rooms.map((r) => `${r.phone}${r.alt_phone ? `/${r.alt_phone}` : ""} ${r.condo}`).join(" | "), res.ok ? `queued ${j?.queued ?? 0} started ${j?.started ?? 0}${j?.waiting ? ` (${j.waiting})` : ""}${(j?.rooms ?? []).filter((x) => x.state === "skipped").map((x) => ` · ข้าม: ${x.reason}`).join("")}` : `ERR ${res.status} ${(await res.text().catch(() => "")).slice(0, 120)}`);
             if (!res.ok && res.status !== 400) { failed = true; break; } // เว็บล่ม → ลองใหม่รอบหน้า (ไม่ขยับ last)
           }
           last = Number(m.id);

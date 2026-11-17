@@ -65,7 +65,16 @@ export async function applyCallResult(db: SupabaseClient, r: CallResult) {
     nextCallAt = new Date(Number.isFinite(when) && when > now ? when : now + 60 * 60_000).toISOString();
   }
 
-  const summary = r.summary ?? (typeof a.summary_th === "string" ? a.summary_th : null);
+  let summary = r.summary ?? (typeof a.summary_th === "string" ? a.summary_th : null);
+
+  // มีเบอร์สำรอง (Phone 2) และเบอร์นี้ไม่รับ/ไม่ติด/ไม่ใช่เจ้าของ → สลับไปโทรเบอร์สำรองทันที (ครั้งเดียว)
+  let switchPhone: string | null = null;
+  if (lead.alt_phone && lead.alt_phone !== lead.phone && ["noanswer", "invalid", "wrong_number"].includes(r.outcome)) {
+    switchPhone = lead.alt_phone;
+    status = "noanswer";
+    nextCallAt = new Date(now + 60_000).toISOString();
+    summary = `${summary ? `${summary} · ` : ""}เบอร์ ${lead.phone} ไม่ได้คุย → โทรเบอร์สำรอง ${switchPhone}`;
+  }
 
   await db
     .from("calls")
@@ -98,6 +107,11 @@ export async function applyCallResult(db: SupabaseClient, r: CallResult) {
       current_lease_until: typeof a.current_lease_until === "string" ? a.current_lease_until : lead.current_lease_until,
     })
     .eq("id", lead.id);
+  if (switchPhone) {
+    // เบอร์ซ้ำกับห้องอื่นที่ชื่อคอนโดเดียวกัน (unique phone+condo) = สลับไม่ได้ ก็โทรเบอร์เดิมซ้ำตามรอบ
+    const { error: swErr } = await db.from("leads").update({ phone: switchPhone, alt_phone: null }).eq("id", lead.id);
+    if (swErr) console.error("switch alt phone", swErr.message);
+  }
 
   // ห้องจากแชท: ส่งผลกลับทันที (ไม่รอรอบ 30 นาที) ให้การ์ดห้องอัปเดต แล้วโทรห้องถัดไปในคิวแชทต่อ
   if (call.via_chat) {

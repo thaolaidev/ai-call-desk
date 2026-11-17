@@ -119,6 +119,10 @@ export async function POST(req: NextRequest) {
       if (!error && typeof r.pet_friendly === "boolean" && r.id != null) {
         await db.from("leads").update({ pet_friendly: r.pet_friendly }).eq("external_id", String(r.id)).then(() => null, () => null);
       }
+      // เบอร์สำรอง (Phone 2) → เบอร์แรกไม่ติด/ไม่รับ ระบบสลับไปโทรเบอร์นี้ (คอลัมน์จาก update_0019_pet.sql)
+      if (!error && r.alt_phone && r.id != null) {
+        await db.from("leads").update({ alt_phone: normalizePhone(String(r.alt_phone)) }).eq("external_id", String(r.id)).then(() => null, () => null);
+      }
     }
     // ห้องที่ระบบไม่ยอมเข้าคิว (เช่น เคยโทรแล้วเบอร์ผิด) แจ้งกลับให้รู้
     const qIds = result.filter((x) => x.state === "queued" && x.id).map((x) => x.id as string);
