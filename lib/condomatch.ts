@@ -9,6 +9,18 @@ const words = (s: string) =>
   s.toLowerCase().replace(/\*/g, " ").replace(/[^\p{L}\p{N}฀-๿]+/gu, " ").split(/\s+/).filter((w) => w && !STOP.has(w));
 const squash = (s: string) => words(s).join("");
 
+/** ข้อความ s (ไม่มีช่องว่าง) = คำที่อยู่ติดกันใน ws พอดีไหม เช่น ["ไอดีโอ","โมบิ","อโศก"] กับ "ไอดีโอโมบิ" */
+function runOf(ws: string[], s: string) {
+  for (let i = 0; i < ws.length; i++) {
+    let acc = "";
+    for (let j = i; j < ws.length && acc.length < s.length; j++) {
+      acc += ws[j];
+      if (acc === s) return true;
+    }
+  }
+  return false;
+}
+
 /** ความเหมือน 0–1 ของชื่อที่พิมพ์ กับชื่อ 1 ส่วนในคลัง (อังกฤษหรือไทย) */
 function similar(input: string, part: string) {
   const a = squash(input), b = squash(part);
@@ -17,8 +29,9 @@ function similar(input: string, part: string) {
   const wa = words(input), wb = words(part);
   const common = wa.filter((w) => wb.includes(w)).length;
   let score = (2 * common) / (wa.length + wb.length);
-  // ไทยเขียนติดกัน/เว้นวรรคต่างกัน: "ไอดีโอโมบิอโศก" vs "ไอดีโอ โมบิ อโศก"
-  if (a.length >= 6 && (b.includes(a) || a.includes(b))) score = Math.max(score, Math.min(a.length, b.length) / Math.max(a.length, b.length) + 0.1);
+  // เว้นวรรคต่างกัน: "ไอดีโอโมบิ" = คำติดกันของ "ไอดีโอ โมบิ อโศก" · ต้องตรงขอบคำ
+  // (กัน "S Gardens" → "sgardens" ไปตรงกลางคำของ "Lotus Gardens" → "lotu[sgardens]")
+  if (a.length >= 6 && (runOf(wb, a) || runOf(wa, b))) score = Math.max(score, Math.min(a.length, b.length) / Math.max(a.length, b.length) + 0.1);
   return Math.min(score, 0.99);
 }
 
