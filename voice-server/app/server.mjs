@@ -261,7 +261,7 @@ async function listen(s, kind, question) {
 }
 
 const KINDS = {
-  avail: 'ห้องยังว่างไหม → intent: "yes" (ว่าง/ยังว่าง) | "no" (ไม่ว่าง/มีคนเช่า/ขายแล้ว) | "callback" (ไม่สะดวก ให้โทรใหม่) | "dnc" (ไม่ให้ติดต่อ/ไม่ฝากเอเจนต์) | "wrong" (ไม่ใช่เจ้าของ) | "ask_price" (ยังไม่ตอบว่าว่างไหม แต่ถามกลับเรื่องราคา เช่น "ราคาเท่าไหร่" "ลูกค้าดูไว้ราคาเท่าไหร่") | "unclear" · asks_price = true ถ้าเจ้าของถามราคา\n' +
+  avail: 'ห้องยังว่างไหม → intent: "yes" (ว่าง/ยังว่าง) | "no" (ไม่ว่าง/มีคนเช่า/ขายแล้ว) | "callback" (ไม่สะดวก ให้โทรใหม่) | "dnc" (ไม่ให้ติดต่อ/ไม่ฝากเอเจนต์) | "wrong" (ไม่ใช่เจ้าของ) | "ask_price" (ยังไม่ตอบว่าว่างไหม แต่ถามกลับเรื่องราคา เช่น "ราคาเท่าไหร่" "ลูกค้าดูไว้ราคาเท่าไหร่") | "ask_condo" (ยังไม่ตอบ แต่ถามกลับว่าห้องไหน/คอนโดไหน/อะไรนะ ฟังชื่อไม่ทัน) | "unclear" · asks_price = true ถ้าเจ้าของถามราคา · asks_condo = true ถ้าถามว่าคอนโดไหน/ห้องไหน\n' +
     'ระวังเป็นพิเศษ: "ไม่ว่าง" กับ "ยังว่าง" ฟังคล้ายกันมากทางโทรศัพท์ ให้ฟังพยางค์แรกให้ชัด ("ไม่" เสียงสั้น สระ ไ / "ยัง" มีตัวสะกด ง) และดูคำอื่นประกอบ เช่น "มีคนเช่าแล้ว" "ไม่ค่ะ" · ถ้าไม่แน่ใจ ให้ตอบ "unclear"',
   ready: 'พร้อมเข้าอยู่เลยไหม → intent: "yes" | "no" | "unclear" · ถ้าบอกวันที่/เดือนที่ว่าง ให้ใส่ available_from',
   date: 'ว่างวันที่เท่าไหร่ → intent: "answered" | "unclear" · available_from = วันที่ตามที่เจ้าของพูด',
@@ -311,13 +311,19 @@ function askedPriceText(text) {
   return /ราคา.{0,8}(เท่าไ|กี่|ไหร่|อะไร|ที่ดู|ที่ลูกค้า)|กี่บาท|ให้ราคา(เท่า|ได้)|ราคาลูกค้า|ลูกค้า.{0,10}ราคา/.test(s);
 }
 
+/** เจ้าของถามกลับว่าห้อง/คอนโดไหน เช่น "คอนโดไหนคะ" "ห้องไหน" "ที่ไหนนะ" "อะไรนะคะ" */
+function askedCondoText(text) {
+  const s = String(text ?? "").replace(/\s+/g, "");
+  return /(คอนโด|ห้อง|โครงการ|ตึก)(ไหน|อะไร|ที่ไหน)|ที่ไหนนะ|ชื่ออะไร|อะไรนะ|ว่าไงนะ|ห้องเลขที่|ห้องที่เท่าไ/.test(s);
+}
+
 const noThinking = new Set(); // รุ่นที่ไม่รับการตั้งระดับคิด
 async function understand(kind, question, wav) {
   if (!CFG.geminiKey) return { intent: "unclear", text: "", error: "no GEMINI_API_KEY" };
   const prompt =
     `เสียงนี้คือคำตอบของเจ้าของห้องคอนโด (ภาษาไทย ทางโทรศัพท์) ต่อคำถาม "${question}"\n` +
     `${KINDS[kind]}\nขั้นตอน: ถอดคำพูดของเจ้าของเป็นข้อความ (text) ให้ตรงทุกคำก่อน แล้วตัดสิน intent จาก text นั้น intent ต้องไม่ขัดกับ text · ห้ามเดา ถ้าฟังไม่ออกให้ unclear\n` +
-    'ตอบ JSON เท่านั้น: {"text": string, "intent": string, "confidence": number (0-1), "available_from": string|null, "owner_price": number|null, "asks_nationality": boolean, "asks_price": boolean, "excluded_nationalities": string[]|null}';
+    'ตอบ JSON เท่านั้น: {"text": string, "intent": string, "confidence": number (0-1), "available_from": string|null, "owner_price": number|null, "asks_nationality": boolean, "asks_price": boolean, "asks_condo": boolean, "excluded_nationalities": string[]|null}';
   try {
     const model = kind === "avail" ? CFG.geminiModelKey : CFG.geminiModel;
     // คิดน้อยที่สุดเพื่อให้ตอบเร็ว (3.8 Flash รับต่ำสุดแค่ "low", รุ่น Lite รับ "minimal")
@@ -347,7 +353,7 @@ async function understand(kind, question, wav) {
     // กันผลขัดกันเอง: ข้อความที่ถอดได้บอกว่า "ไม่ว่าง/ไม่รับ" แต่ intent ออกมาเป็น yes → เชื่อข้อความ
     const fixed = checkText(kind, String(j.text ?? ""), intent);
     if (fixed !== intent) { log("intent fixed by text", kind, intent, "→", fixed, JSON.stringify(j.text)); intent = fixed; }
-    return { intent, confidence: Number.isFinite(conf) ? conf : null, heard: String(j.intent ?? ""), text: String(j.text ?? ""), available_from: j.available_from ?? null, owner_price: j.owner_price ?? null, asks_nationality: !!j.asks_nationality, asks_price: !!j.asks_price || askedPriceText(String(j.text ?? "")), excluded: excludedFrom(kind, String(j.text ?? ""), j.excluded_nationalities) };
+    return { intent, confidence: Number.isFinite(conf) ? conf : null, heard: String(j.intent ?? ""), text: String(j.text ?? ""), available_from: j.available_from ?? null, owner_price: j.owner_price ?? null, asks_nationality: !!j.asks_nationality, asks_price: !!j.asks_price || askedPriceText(String(j.text ?? "")), asks_condo: !!j.asks_condo || askedCondoText(String(j.text ?? "")), excluded: excludedFrom(kind, String(j.text ?? ""), j.excluded_nationalities) };
   } catch (err) {
     return { intent: "unclear", text: "", error: err.message };
   }
@@ -389,17 +395,25 @@ async function runFlow(s) {
     if (p.owner_price) live.owner_price = Number(p.owner_price) || null;
     return p;
   };
-  let a = await ask("avail", "ห้องยังว่างอยู่ไหม", () => P("02-2"), (x) => x.intent === "unclear" && !askedPrice(x));
-  for (let i = 0; i < 2 && !s.gone && askedPrice(a) && a.intent !== "yes" && a.intent !== "no"; i++) {
+  // ถามว่าคอนโดไหน → พูดชื่อคอนโดอีกครั้ง "ไม่ทราบว่าห้อง [คอนโด] ยังว่างอยู่ไหมคะ"
+  const askedCondo = (x) => x.intent === "ask_condo" || !!x.asks_condo;
+  const askCondoAgain = async () => { await P("02-1"); if (s.snd.condo) await play(s, s.snd.condo); await P("02-2"); };
+  const clarify = (x) => x.intent !== "yes" && x.intent !== "no" && (askedPrice(x) || askedCondo(x));
+  let a = await ask("avail", "ห้องยังว่างอยู่ไหม", () => P("02-2"), (x) => x.intent === "unclear" && !clarify(x));
+  for (let i = 0; i < 3 && !s.gone && clarify(a); i++) {
+    if (askedCondo(a) && !askedPrice(a)) {
+      a = await ask("avail", "ห้องยังว่างอยู่ไหม (บอกชื่อคอนโดอีกครั้ง)", askCondoAgain, (x) => x.intent === "unclear" && !clarify(x));
+      continue;
+    }
     if (s.snd.price && s.on("04-1") && !priceDone) {
       const p = await confirmPrice();
       if (s.gone || p.intent === "hangup") return;
     }
     // ถามห้องว่างอีกครั้ง (ไม่มีไฟล์ราคา = ถามซ้ำเฉยๆ)
-    a = await ask("avail", "ห้องยังว่างอยู่ไหม (หลังบอกราคา)", () => P("02-2"), true);
+    a = await ask("avail", "ห้องยังว่างอยู่ไหม (หลังบอกราคา)", () => P("02-2"), (x) => x.intent === "unclear" && !clarify(x));
   }
   if (a.intent === "hangup" || s.gone) return;
-  if (a.intent === "ask_price") a.intent = "unclear";
+  if (a.intent === "ask_price" || a.intent === "ask_condo") a.intent = "unclear";
 
   const map = { no: "not_avail", callback: "callback", dnc: "dnc", wrong: "wrong_number" };
   if (a.intent !== "yes") {
