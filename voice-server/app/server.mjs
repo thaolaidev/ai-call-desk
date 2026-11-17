@@ -309,6 +309,13 @@ function excludedFrom(kind, text, fromModel) {
   return list.length ? list : null;
 }
 
+/** เจ้าของถามว่าใครโทรมา / เป็นใคร / โทรจากไหน / เป็น AI หรอ */
+function askedWhoText(text) {
+  const s = String(text ?? "").replace(/\s+/g, "");
+  return /(คุณ|นี่|นั่น)?(เป็น)?ใคร(คะ|ครับ|นะ|เหรอ|หรอ|อ่ะ)?$|เป็นใคร|ใครโทร|ใครพูด|โทรจากไหน|โทรมาจากไหน|จากบริษัทไหน|บริษัทอะไร|บริษัทไหน|ชื่ออะไรนะ|เอไอเหรอ|เอไอหรอ|เป็นเอไอ|หุ่นยนต์|เป็นบอท|โทรมาทำไม|มีอะไร(คะ|ครับ)?$/.test(s);
+}
+const askedWho = (a) => !!a?.asks_who || askedWhoText(a?.text);
+
 /** เจ้าของถามกลับเรื่องราคา เช่น "ราคาเท่าไหร่" "ราคาที่ดูไว้" "กี่บาท" (ไม่นับคำว่า เท่าไหร่ดอทคอม) */
 function askedPriceText(text) {
   const s = String(text ?? "").replace(/\s+/g, "").replace(/เท่าไหร่ดอทคอม|เท่าไรดอทคอม/g, "");
@@ -326,8 +333,8 @@ async function understand(kind, question, wav) {
   if (!CFG.geminiKey) return { intent: "unclear", text: "", error: "no GEMINI_API_KEY" };
   const prompt =
     `เสียงนี้คือคำตอบของเจ้าของห้องคอนโด (ภาษาไทย ทางโทรศัพท์) ต่อคำถาม "${question}"\n` +
-    `${KINDS[kind]}\nขั้นตอน: ถอดคำพูดของเจ้าของเป็นข้อความ (text) ให้ตรงทุกคำก่อน แล้วตัดสิน intent จาก text นั้น intent ต้องไม่ขัดกับ text · ห้ามเดา ถ้าฟังไม่ออกให้ unclear\n` +
-    'ตอบ JSON เท่านั้น: {"text": string, "intent": string, "confidence": number (0-1), "available_from": string|null, "owner_price": number|null, "asks_nationality": boolean, "asks_price": boolean, "asks_condo": boolean, "excluded_nationalities": string[]|null}';
+    `${KINDS[kind]}\nasks_who = true ถ้าเจ้าของถามว่าใครโทรมา/เป็นใคร/โทรจากไหน/เป็น AI หรือเปล่า (ยังไม่ได้ตอบคำถาม)\nขั้นตอน: ถอดคำพูดของเจ้าของเป็นข้อความ (text) ให้ตรงทุกคำก่อน แล้วตัดสิน intent จาก text นั้น intent ต้องไม่ขัดกับ text · ห้ามเดา ถ้าฟังไม่ออกให้ unclear\n` +
+    'ตอบ JSON เท่านั้น: {"text": string, "intent": string, "confidence": number (0-1), "available_from": string|null, "owner_price": number|null, "asks_nationality": boolean, "asks_price": boolean, "asks_condo": boolean, "asks_who": boolean, "excluded_nationalities": string[]|null}';
   try {
     const model = kind === "avail" ? CFG.geminiModelKey : CFG.geminiModel;
     // คิดน้อยที่สุดเพื่อให้ตอบเร็ว (3.8 Flash รับต่ำสุดแค่ "low", รุ่น Lite รับ "minimal")
@@ -357,7 +364,7 @@ async function understand(kind, question, wav) {
     // กันผลขัดกันเอง: ข้อความที่ถอดได้บอกว่า "ไม่ว่าง/ไม่รับ" แต่ intent ออกมาเป็น yes → เชื่อข้อความ
     const fixed = checkText(kind, String(j.text ?? ""), intent);
     if (fixed !== intent) { log("intent fixed by text", kind, intent, "→", fixed, JSON.stringify(j.text)); intent = fixed; }
-    return { intent, confidence: Number.isFinite(conf) ? conf : null, heard: String(j.intent ?? ""), text: String(j.text ?? ""), available_from: j.available_from ?? null, owner_price: j.owner_price ?? null, asks_nationality: !!j.asks_nationality, asks_price: !!j.asks_price || askedPriceText(String(j.text ?? "")), asks_condo: !!j.asks_condo || askedCondoText(String(j.text ?? "")), excluded: excludedFrom(kind, String(j.text ?? ""), j.excluded_nationalities) };
+    return { intent, confidence: Number.isFinite(conf) ? conf : null, heard: String(j.intent ?? ""), text: String(j.text ?? ""), available_from: j.available_from ?? null, owner_price: j.owner_price ?? null, asks_nationality: !!j.asks_nationality, asks_price: !!j.asks_price || askedPriceText(String(j.text ?? "")), asks_condo: !!j.asks_condo || askedCondoText(String(j.text ?? "")), asks_who: !!j.asks_who, excluded: excludedFrom(kind, String(j.text ?? ""), j.excluded_nationalities) };
   } catch (err) {
     return { intent: "unclear", text: "", error: err.message };
   }
@@ -369,11 +376,29 @@ async function runFlow(s) {
   const L = (kind, _step, q) => listen(s, kind, q); // ไม่พูด 2 วินาที = ไม่ตอบ · พูดแล้วเงียบ 1 วินาที = ตอบจบ
   const Q = (k) => s.title[k] ?? k;
   /** ถามแล้วรอคำตอบ · เจ้าของไม่ตอบ (เงียบ 2 วินาที) → ถามซ้ำ 1 ครั้ง · retryUnclear = ฟังไม่ออกก็ถามซ้ำ */
+  // เจ้าของถามว่าใครโทรมา → แนะนำตัว "ดิฉันเป็น AI Real Estate Agent จากบริษัทเท่าไหร่ดอทคอมค่ะ มีลูกค้าสนใจจะนัดชมห้อง [คอนโด] ค่ะ ต้องขออภัยนะคะ…"
+  // ยังไม่มีไฟล์ 11-1/11-2 → ใช้ท่อนทักทาย 01-2 + 01-3 แทน
+  const tellWho = async () => {
+    log(s.callId, "who: แนะนำตัว");
+    if (s.on("11-1")) { await P("11-1"); if (s.snd.condo) await play(s, s.snd.condo); await P("11-2"); }
+    else { await P("01-2"); await P("01-3"); }
+  };
   const ask = async (kind, q, say, retryUnclear = false) => {
     s.qStart = Date.now(); await say();
     let a = await L(kind, null, q);
+    // ถามว่าเป็นใคร (ยังไม่ได้ตอบคำถาม) → แนะนำตัว แล้วถามข้อเดิมอีกครั้ง (ไม่เกิน 2 รอบ)
+    for (let i = 0; i < 2 && !s.gone && askedWho(a) && a.intent !== "yes" && a.intent !== "no"; i++) {
+      await tellWho();
+      if (s.gone) return a;
+      s.qStart = Date.now(); await say();
+      a = await L(kind, null, `${q} (หลังแนะนำตัว)`);
+    }
     const again = typeof retryUnclear === "function" ? retryUnclear(a) : retryUnclear && a.intent === "unclear";
-    if (!s.gone && (a.intent === "silent" || again)) { s.qStart = Date.now(); await say(); a = await L(kind, null, `${q} (ถามซ้ำ)`); }
+    if (!s.gone && (a.intent === "silent" || again)) {
+      // ฟังไม่ชัด → "ขออภัยค่ะ" ก่อนถามซ้ำ (มีไฟล์ท่อน 12)
+      if (again && s.on("12")) await P("12");
+      s.qStart = Date.now(); await say(); a = await L(kind, null, `${q} (ถามซ้ำ)`);
+    }
     return a;
   };
   const live = (s.live = { outcome: "unclear", ready_now: null, available_from: null, price_confirmed: null, owner_price: null, accepts_foreigners: null, owner_agreed_profile: null, nationality_told: null, accepted_after_rules: null, pet_friendly: null });
