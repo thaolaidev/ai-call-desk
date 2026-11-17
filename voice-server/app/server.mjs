@@ -267,7 +267,7 @@ const KINDS = {
   date: 'ว่างวันที่เท่าไหร่ → intent: "answered" | "unclear" · available_from = วันที่ตามที่เจ้าของพูด',
   month: 'เดือนไหน → intent: "answered" | "unclear" · available_from = เดือนตามที่เจ้าของพูด',
   price: 'ราคาห้องตามที่บอทพูดถูกไหม → intent: "yes" | "no" | "unclear" · ถ้าเจ้าของบอกราคาใหม่ ใส่ owner_price (ตัวเลขบาท)',
-  foreign: 'เจ้าของรับลูกค้าต่างชาติไหม → intent: "yes" (รับ) | "no" (ไม่รับ/เฉพาะคนไทย) | "ask" (ยังไม่ตอบว่ารับไหม แต่ถามกลับว่าลูกค้าชาติไหน เช่น "ชาติไหน" "คนที่ไหน") | "unclear" · asks_nationality = true ถ้าเจ้าของถามว่าผู้เช่า/ลูกค้าชาติไหน (ทั้งกรณี ask และ yes)',
+  foreign: 'เจ้าของรับลูกค้าต่างชาติไหม → intent: "yes" (รับ · รวมถึงไม่รับแค่บางสัญชาติ เช่น "ไม่รับจีนกับอินเดีย" = รับชาติอื่น ให้ใส่ excluded_nationalities) | "no" (ไม่รับต่างชาติเลย/รับแต่คนไทย) | "ask" (ยังไม่ตอบว่ารับไหม แต่ถามกลับว่าลูกค้าชาติไหน เช่น "ชาติไหน" "คนที่ไหน") | "unclear" · asks_nationality = true ถ้าเจ้าของถามว่าผู้เช่า/ลูกค้าชาติไหน (ทั้งกรณี ask และ yes)',
   rules: 'บอทเพิ่งอธิบายกฎตรวจห้องของบริษัท เจ้าของเปลี่ยนใจรับลูกค้าต่างชาติไหม → intent: "yes" (โอเค/รับได้/ถ้าแบบนี้รับ) | "no" (ยังไม่รับ/รับแต่คนไทย) | "unclear" (แค่รับฟัง เช่น ค่ะ ครับ อืม)',
   profile: 'ให้แอดมินส่งโปรไฟล์ลูกค้าให้พิจารณาก่อนดีไหม → intent: "yes" (ได้/ส่งมาได้/ลองดู) | "no" (ไม่ต้อง/ไม่รับ/ไม่สนใจ) | "unclear"',
 };
@@ -279,9 +279,30 @@ const NEG = {
   profile: /ไม่ต้อง|ไม่สะดวก|ไม่สนใจ|ไม่เอา/,
 };
 function checkText(kind, text, intent) {
+  // ต่างชาติ: "ไม่รับจีนกับอินเดีย" = รับชาติอื่น → yes (ไม่ใช่ no)
+  if (kind === "foreign" && partialForeign(text).length) return "yes";
   const re = NEG[kind];
   if (!re || intent !== "yes") return intent;
   return re.test(text.replace(/\s+/g, "")) ? "no" : intent;
+}
+
+// สัญชาติที่เจ้าของอาจไม่รับเป็นบางชาติ
+const NATS = ["จีน", "อินเดีย", "แขก", "ญี่ปุ่น", "เกาหลี", "เวียดนาม", "พม่า", "เมียนมา", "ลาว", "กัมพูชา", "เขมร", "ฟิลิปปินส์", "อินโดนีเซีย", "มาเลเซีย", "รัสเซีย", "อเมริกัน", "ฝรั่ง", "อาหรับ", "ตะวันออกกลาง", "แอฟริกา", "ไนจีเรีย", "ผิวสี", "ผิวดำ", "ปากีสถาน", "บังคลาเทศ", "เนปาล", "ไต้หวัน", "ฮ่องกง", "อิหร่าน", "อิสราเอล", "ยุโรป"];
+const NAT_RE = new RegExp(`(${NATS.join("|")})`, "g");
+/** "ไม่รับคนจีนกับอินเดีย" → ["จีน","อินเดีย"] · "ไม่รับต่างชาติ" / ไม่มีคำว่าไม่รับ → [] */
+function partialForeign(text) {
+  NAT_RE.lastIndex = 0;
+  const s = String(text ?? "").replace(/\s+/g, "");
+  const m = s.match(/(?:ไม่รับ|ยกเว้น|ไม่เอา|ไม่ให้)(.{0,40})/);
+  if (!m) return [];
+  if (/^(?:คน|ลูกค้า|ผู้เช่า)?ต่างชาติ/.test(m[1]) && !NAT_RE.test(m[1].replace(/^(?:คน|ลูกค้า|ผู้เช่า)?ต่างชาติ/, ""))) return [];
+  NAT_RE.lastIndex = 0;
+  return [...new Set(m[1].match(NAT_RE) ?? [])];
+}
+function excludedFrom(kind, text, fromModel) {
+  if (kind !== "foreign") return null;
+  const list = [...new Set([...(Array.isArray(fromModel) ? fromModel.map(String) : []), ...partialForeign(text)])].filter(Boolean);
+  return list.length ? list : null;
 }
 
 const noThinking = new Set(); // รุ่นที่ไม่รับการตั้งระดับคิด
@@ -290,7 +311,7 @@ async function understand(kind, question, wav) {
   const prompt =
     `เสียงนี้คือคำตอบของเจ้าของห้องคอนโด (ภาษาไทย ทางโทรศัพท์) ต่อคำถาม "${question}"\n` +
     `${KINDS[kind]}\nขั้นตอน: ถอดคำพูดของเจ้าของเป็นข้อความ (text) ให้ตรงทุกคำก่อน แล้วตัดสิน intent จาก text นั้น intent ต้องไม่ขัดกับ text · ห้ามเดา ถ้าฟังไม่ออกให้ unclear\n` +
-    'ตอบ JSON เท่านั้น: {"text": string, "intent": string, "confidence": number (0-1), "available_from": string|null, "owner_price": number|null, "asks_nationality": boolean}';
+    'ตอบ JSON เท่านั้น: {"text": string, "intent": string, "confidence": number (0-1), "available_from": string|null, "owner_price": number|null, "asks_nationality": boolean, "excluded_nationalities": string[]|null}';
   try {
     const model = kind === "avail" ? CFG.geminiModelKey : CFG.geminiModel;
     // คิดน้อยที่สุดเพื่อให้ตอบเร็ว (3.8 Flash รับต่ำสุดแค่ "low", รุ่น Lite รับ "minimal")
@@ -320,7 +341,7 @@ async function understand(kind, question, wav) {
     // กันผลขัดกันเอง: ข้อความที่ถอดได้บอกว่า "ไม่ว่าง/ไม่รับ" แต่ intent ออกมาเป็น yes → เชื่อข้อความ
     const fixed = checkText(kind, String(j.text ?? ""), intent);
     if (fixed !== intent) { log("intent fixed by text", kind, intent, "→", fixed, JSON.stringify(j.text)); intent = fixed; }
-    return { intent, confidence: Number.isFinite(conf) ? conf : null, heard: String(j.intent ?? ""), text: String(j.text ?? ""), available_from: j.available_from ?? null, owner_price: j.owner_price ?? null, asks_nationality: !!j.asks_nationality };
+    return { intent, confidence: Number.isFinite(conf) ? conf : null, heard: String(j.intent ?? ""), text: String(j.text ?? ""), available_from: j.available_from ?? null, owner_price: j.owner_price ?? null, asks_nationality: !!j.asks_nationality, excluded: excludedFrom(kind, String(j.text ?? ""), j.excluded_nationalities) };
   } catch (err) {
     return { intent: "unclear", text: "", error: err.message };
   }
@@ -396,7 +417,11 @@ async function runFlow(s) {
   const tellNationality = async () => {
     if (natTold) return;
     natTold = true;
-    const opts = ["06A", "06B"].filter((k) => snd(k));
+    // ไม่บอกชุดสัญชาติที่เจ้าของไม่รับ (เช่น ไม่รับเกาหลี → ไม่ใช้ชุด B)
+    const bad = live.foreign_exclude ?? [];
+    let opts = ["06A", "06B"].filter((k) => snd(k));
+    const clean = opts.filter((k) => !bad.some((n) => String(Q(k)).includes(n)));
+    if (clean.length) opts = clean;
     const pick = opts[Math.floor(Math.random() * opts.length)];
     if (pick) { live.nationality_told = Q(pick); log(s.callId, "nationality", pick); await play(s, s.snd[pick]); }
   };
@@ -410,6 +435,7 @@ async function runFlow(s) {
     if (g.intent === "hangup" || s.gone) return;
     f = g;
   }
+  if (f.excluded?.length) live.foreign_exclude = f.excluded;
   if (f.intent === "yes") {
     live.accepts_foreigners = true;
     live.outcome = "avail_ok";

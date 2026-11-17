@@ -29,6 +29,7 @@ export type CallDetails = {
   owner_price: number | null;         // ราคาที่เจ้าของบอก ถ้าไม่ตรงกับเดิม
   accepts_foreigners: boolean | null; // รับลูกค้าต่างชาติไหม
   owner_agreed_profile: boolean | null; // ยอมให้แอดมินส่งโปรไฟล์ลูกค้าไหม
+  excluded_nationalities?: string | null; // รับต่างชาติ แต่ไม่รับสัญชาติเหล่านี้
 };
 
 /** ตัดส่วนที่เป็นเสียงอัดของเราออก เหลือเฉพาะคำตอบของเจ้าของ (เสียงอัดจบด้วย "ได้เลยค่ะ") */
@@ -109,9 +110,9 @@ export async function analyzeWithGemini(audio: ArrayBuffer): Promise<(Classified
     "ให้ยึดคำตอบของเจ้าของเป็นหลัก เจ้าของอาจตอบช้า ตอบข้ามข้อ หรือพูดแทรกเสียงบอท ให้จับคู่คำตอบกับคำถามตามความหมาย\n" +
     "1) ถอดเสียงทั้งไฟล์เป็นข้อความ\n2) แยกเฉพาะคำพูดของเจ้าของห้อง (ไม่รวมเสียงบอท)\n" +
     "3) จัดผล outcome: avail = ห้องยังว่าง · not_avail = ไม่ว่าง/มีคนเช่า/ขายแล้ว · callback = ขอให้โทรมาใหม่ · dnc = ขอไม่ให้ติดต่อ/ไม่ฝากเอเจนต์ · wrong_number = ไม่ใช่เจ้าของ · unclear = ไม่ตอบหรือฟังไม่ออก\n" +
-    "4) รายละเอียด (ไม่ได้ตอบให้ null): ready_now = พร้อมเข้าอยู่เลยไหม · available_from = วันที่/เดือนที่ว่างตามที่เจ้าของพูด · price_confirmed = ยืนยันราคาที่บอทพูด · owner_price = ราคาที่เจ้าของบอกถ้าไม่ตรง (ตัวเลขบาท) · accepts_foreigners = รับต่างชาติไหม · owner_agreed_profile = เจ้าของยอมให้ส่งโปรไฟล์ลูกค้าไหม · current_lease_until = ผู้เช่าปัจจุบันอยู่ถึงเมื่อไหร่\n" +
+    "4) รายละเอียด (ไม่ได้ตอบให้ null): ready_now = พร้อมเข้าอยู่เลยไหม · available_from = วันที่/เดือนที่ว่างตามที่เจ้าของพูด · price_confirmed = ยืนยันราคาที่บอทพูด · owner_price = ราคาที่เจ้าของบอกถ้าไม่ตรง (ตัวเลขบาท) · accepts_foreigners = รับต่างชาติไหม (ไม่รับแค่บางสัญชาติ เช่น “ไม่รับจีนกับอินเดีย” = true และใส่ excluded_nationalities) · owner_agreed_profile = เจ้าของยอมให้ส่งโปรไฟล์ลูกค้าไหม · current_lease_until = ผู้เช่าปัจจุบันอยู่ถึงเมื่อไหร่\n" +
     "ห้ามนับคำในเสียงบอท ห้ามเดา\n" +
-    'ตอบเป็น JSON เท่านั้น: {"transcript": string, "owner_answer": string, "outcome": "avail|not_avail|callback|dnc|wrong_number|unclear", "ready_now": boolean|null, "available_from": string|null, "price_confirmed": boolean|null, "owner_price": number|null, "accepts_foreigners": boolean|null, "owner_agreed_profile": boolean|null, "current_lease_until": string|null, "summary_th": string}';
+    'ตอบเป็น JSON เท่านั้น: {"transcript": string, "owner_answer": string, "outcome": "avail|not_avail|callback|dnc|wrong_number|unclear", "ready_now": boolean|null, "available_from": string|null, "price_confirmed": boolean|null, "owner_price": number|null, "accepts_foreigners": boolean|null, "owner_agreed_profile": boolean|null, "excluded_nationalities": string[]|null, "current_lease_until": string|null, "summary_th": string}';
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": key },
@@ -134,6 +135,7 @@ export async function analyzeWithGemini(audio: ArrayBuffer): Promise<(Classified
     owner_price: Number.isFinite(Number(j.owner_price)) && j.owner_price != null ? Number(j.owner_price) : null,
     accepts_foreigners: bool(j.accepts_foreigners),
     owner_agreed_profile: bool(j.owner_agreed_profile),
+    excluded_nationalities: Array.isArray(j.excluded_nationalities) && j.excluded_nationalities.length ? j.excluded_nationalities.map(String).join(", ") : null,
   };
   let outcome: Outcome = allowed.includes(j.outcome) ? (j.outcome as Outcome) : "unclear";
   // ว่าง + รู้ว่ารับต่างชาติหรือไม่ → แยกผลให้ละเอียดขึ้น

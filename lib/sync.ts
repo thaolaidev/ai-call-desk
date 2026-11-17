@@ -47,6 +47,7 @@ export function buildResultPayload(call: any, lead: any, sentAt = new Date().toI
   const extra = [
     status === "ว่าง" && availText && !availDate ? `ว่าง: ${availText}` : "",
     a.owner_price ? `เจ้าของแจ้งราคา ${Number(a.owner_price).toLocaleString("en-US")} บาท` : "",
+    a.foreign_exclude ? `รับต่างชาติ ยกเว้น ${a.foreign_exclude}` : "",
   ].filter(Boolean).join(" · ");
   const note = status
     ? [call.summary, extra].filter(Boolean).join(" · ") || null
