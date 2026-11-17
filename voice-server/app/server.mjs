@@ -456,6 +456,21 @@ async function hangup(s) {
 // ---------- จบสาย: ส่งผล + ไฟล์เสียงกลับเว็บ ----------
 const PRE_ANSWER = { 17: "noanswer", 18: "noanswer", 19: "noanswer", 21: "noanswer", 1: "invalid", 3: "invalid", 22: "invalid", 28: "invalid", 34: "noanswer", 38: "noanswer" };
 
+/** ส่งผลโทรไปเว็บ (ลองซ้ำ 4 ครั้ง) */
+async function postResult(payload, mp3) {
+  for (let i = 0; i < 4; i++) {
+    try {
+      const fd = new FormData();
+      fd.append("json", JSON.stringify(payload));
+      if (mp3) fd.append("recording", new Blob([mp3], { type: "audio/mpeg" }), `${payload.call_id}.mp3`);
+      const res = await fetch(CFG.resultUrl, { method: "POST", headers: { "x-voice-secret": CFG.secret }, body: fd, signal: AbortSignal.timeout(60_000) });
+      if (res.ok) { log(payload.call_id, "result sent"); break; }
+      log(payload.call_id, "result HTTP", res.status, (await res.text()).slice(0, 200));
+    } catch (err) { log(payload.call_id, "result error", err.message); }
+    await new Promise((r) => setTimeout(r, [2000, 10_000, 30_000][i] ?? 60_000));
+  }
+}
+
 async function finish(s) {
   if (s.finished) return;
   s.finished = true;
@@ -478,17 +493,7 @@ async function finish(s) {
     }
   }
   const payload = { call_id: s.callId, status, cause: s.cause ?? null, duration_sec: duration, answers: s.answers, live: s.live ?? null };
-  for (let i = 0; i < 4; i++) {
-    try {
-      const fd = new FormData();
-      fd.append("json", JSON.stringify(payload));
-      if (mp3) fd.append("recording", new Blob([mp3], { type: "audio/mpeg" }), `${s.callId}.mp3`);
-      const res = await fetch(CFG.resultUrl, { method: "POST", headers: { "x-voice-secret": CFG.secret }, body: fd, signal: AbortSignal.timeout(60_000) });
-      if (res.ok) { log(s.callId, "result sent"); break; }
-      log(s.callId, "result HTTP", res.status, (await res.text()).slice(0, 200));
-    } catch (err) { log(s.callId, "result error", err.message); }
-    await new Promise((r) => setTimeout(r, [2000, 10_000, 30_000][i] ?? 60_000));
-  }
+  await postResult(payload, mp3);
   // ลบไฟล์ชั่วคราว (เก็บไฟล์เต็มไว้ที่เว็บแล้ว)
   for (let n = 1; n <= s.turn; n++) for (const x of ["", "-c1", "-c2", "-all", "-ov"]) await unlink(`${CFG.recDir}/ans-${s.callId}-${n}${x}.wav`).catch(() => {});
   if (mp3) await unlink(`${CFG.recDir}/full-${s.callId}.wav`).catch(() => {});
@@ -515,32 +520,42 @@ async function startCall(body) {
   if (sessions.size >= CFG.maxCalls) throw Object.assign(new Error(`สายเต็ม (${CFG.maxCalls})`), { code: 429 });
   if (!wsUp) throw Object.assign(new Error("ยังเชื่อม Asterisk ไม่ได้"), { code: 503 });
 
-  // เตรียมไฟล์เสียงก่อนโทร
-  const snd = {};
-  for (const [k, url] of Object.entries(body.audio ?? {})) snd[k] = await prepare(url);
-  if (body.condo_url) snd.condo = await prepare(body.condo_url).catch(() => null);
-  if (body.price_url) snd.price = await prepare(body.price_url).catch(() => null);
-  const enabled = new Set(body.enabled ?? Object.keys(snd));
-
+  // ตอบเว็บทันที (ไม่ให้เว็บรอจนหมดเวลาแล้วนับเป็นโทรไม่สำเร็จ ทั้งที่สายออกไปแล้ว)
+  // แล้วค่อยเตรียมไฟล์เสียง + โทรออกเบื้องหลัง · ล้มเหลว = แจ้งเว็บเป็นผลโทร "error"
   const id = `tl-${callId}`;
-  const s = { id, callId, mode: body.mode === "short" ? "short" : "full", turn: 0, answers: [], pending: new Set(), snd, title: body.titles ?? {}, on: (k) => enabled.has(k) && !!snd[k], started: false, answered: false, gone: false, talkStarts: [], qStart: 0 };
-  sessions.set(id, s);
+  const enabled = new Set(body.enabled ?? []);
+  const s = { id, callId, mode: body.mode === "short" ? "short" : "full", turn: 0, answers: [], pending: new Set(), snd: {}, title: body.titles ?? {}, on: (k) => (body.enabled ? enabled.has(k) : true) && !!s.snd[k], started: false, answered: false, gone: false, talkStarts: [], qStart: 0 };
+  sessions.set(id, s); // จองที่ไว้ก่อน (นับจำนวนสายพร้อมกัน)
+  dial(s, body, number).catch(async (err) => {
+    log(callId, "start failed", err.message);
+    clearTimeout(s.timer); clearTimeout(s.maxTimer);
+    sessions.delete(id);
+    s.finished = true;
+    await postResult({ call_id: callId, status: "error", error: String(err.message).slice(0, 300), answers: [], live: null }, null).catch(() => {});
+  });
+  return { ok: true, channel: id };
+}
+
+/** เตรียมไฟล์เสียง (ทำพร้อมกัน) แล้วโทรออก */
+async function dial(s, body, number) {
+  const entries = Object.entries(body.audio ?? {});
+  const files = await Promise.all(entries.map(([, url]) => prepare(url)));
+  entries.forEach(([k], i) => { s.snd[k] = files[i]; });
+  const [condo, price] = await Promise.all([
+    body.condo_url ? prepare(body.condo_url).catch(() => null) : null,
+    body.price_url ? prepare(body.price_url).catch(() => null) : null,
+  ]);
+  if (condo) s.snd.condo = condo;
+  if (price) s.snd.price = price;
   // กันค้าง: ไม่มีใครรับเกินเวลา → ปิดเป็นไม่รับสาย · คุยเกิน 6 นาที → วางสาย
   s.timer = setTimeout(() => { if (!s.answered && !s.finished) { s.cause = s.cause ?? 19; hangup(s); finish(s); } }, (CFG.ringTimeout + 20) * 1000);
   s.maxTimer = setTimeout(() => hangup(s), 6 * 60_000);
-  try {
-    await ari("POST", "/channels", {
-      endpoint: CFG.endpoint.replace("{number}", number),
-      extension: "s", context: "thaolai-out", priority: 1,
-      channelId: id, timeout: CFG.ringTimeout, callerId: CFG.callerId || undefined,
-    }, { variables: { CALL_ID: callId } });
-  } catch (err) {
-    clearTimeout(s.timer); clearTimeout(s.maxTimer);
-    sessions.delete(id);
-    throw err;
-  }
-  log(callId, "dialing", number);
-  return { ok: true, channel: id };
+  await ari("POST", "/channels", {
+    endpoint: CFG.endpoint.replace("{number}", number),
+    extension: "s", context: "thaolai-out", priority: 1,
+    channelId: s.id, timeout: CFG.ringTimeout, callerId: CFG.callerId || undefined,
+  }, { variables: { CALL_ID: s.callId } });
+  log(s.callId, "dialing", number);
 }
 
 const server = http.createServer(async (req, res) => {

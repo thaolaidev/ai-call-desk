@@ -28,11 +28,13 @@ export async function POST(req: NextRequest) {
   if (call.state === "ended") return NextResponse.json({ ok: true, note: "ประมวลผลไปแล้ว" });
 
   if (r.status !== "answered") {
+    // error = server เสียงโทรออกไม่สำเร็จ (เช่น โหลดไฟล์เสียงไม่ได้) → นับเป็นไม่รับสาย ระบบจะลองใหม่ตามรอบโทรซ้ำ
     await applyCallResult(db, {
       callId: call.id,
       outcome: r.status === "invalid" ? "invalid" : "noanswer",
-      endedReason: `sip:${r.status} cause ${r.cause ?? "-"}`,
-      transcript: [{ role: "system", text: r.status === "invalid" ? "เบอร์ไม่ถูกต้อง/ติดต่อไม่ได้" : "ไม่รับสาย" }],
+      summary: r.status === "error" ? `โทรออกไม่สำเร็จ: ${String(r.error ?? "").slice(0, 200)}` : undefined,
+      endedReason: `sip:${r.status} ${r.status === "error" ? String(r.error ?? "").slice(0, 120) : `cause ${r.cause ?? "-"}`}`,
+      transcript: [{ role: "system", text: r.status === "invalid" ? "เบอร์ไม่ถูกต้อง/ติดต่อไม่ได้" : r.status === "error" ? "server เสียงโทรออกไม่สำเร็จ" : "ไม่รับสาย" }],
     });
     return NextResponse.json({ ok: true });
   }
