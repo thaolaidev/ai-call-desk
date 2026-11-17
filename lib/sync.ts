@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { vpsBase } from "./vps";
 import { thaiDateToISO } from "./thaidate";
+import { botMarkUnsure } from "./chatbot";
 
 /** ปลายทางส่งผล: POST {VPS_API_URL}/results (X-API-Key) หรือ VPS_WEBHOOK_URL แบบเดิม (ลายเซ็น HMAC) */
 function target() {
@@ -83,8 +84,10 @@ export function buildResultPayload(call: any, lead: any, sentAt = new Date().toI
     available_text: availText,
     owner_price: a.owner_price ?? null,
     contacted: status !== null,
-    // API เว็บเท่าไหร่รับ ว่าง / ไม่ว่าง / ติดต่อไม่ได้ (ห้ามว่าง) — ติดต่อไม่ได้ = คงสถานะห้องเดิม บันทึกแค่ประวัติโทร
-    status: status ?? "ติดต่อไม่ได้",
+    // API เว็บเท่าไหร่รับ ว่าง / ไม่ว่าง / ยังไม่แน่นอน / ติดต่อไม่ได้ (ห้ามว่าง)
+    // ไม่รับสาย / ฟังไม่ชัด / ขอให้โทรกลับ = "ยังไม่แน่นอน" (ห้องยังไม่แน่นอน + ประวัติโทรแล้ว · AI โทรซ้ำตามรอบ)
+    // เบอร์ผิด / เบอร์ปิด / ไม่ให้ติดต่อ = "ติดต่อไม่ได้" (คงสถานะห้องเดิม)
+    status: status ?? (UNSURE_OUTCOMES.includes(call.outcome) ? "ยังไม่แน่นอน" : "ติดต่อไม่ได้"),
     status_updated_at: status ? sentAt : null,
     previous_status: lead.vps_status ?? null,
     note,
@@ -147,6 +150,9 @@ export async function checkHandled(items: { id: string; since_seconds: number }[
   return done;
 }
 
+/** ผลที่ยังไม่ได้คำตอบเรื่องห้อง และจะโทรซ้ำ → ส่งสถานะ "ยังไม่แน่นอน" */
+export const UNSURE_OUTCOMES = ["noanswer", "unclear", "callback"];
+
 export function sign(secret: string, timestamp: string, body: string) {
   return "sha256=" + createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
 }
@@ -166,8 +172,8 @@ export async function deliverResult(db: SupabaseClient, callId: string) {
 
   const sentAt = new Date().toISOString();
   const { data: st } = await db.from("settings").select("max_attempts").eq("id", 1).maybeSingle();
-  const payload = buildResultPayload(call, lead, sentAt, st?.max_attempts ?? null);
-  const body = JSON.stringify(payload);
+  const payload: Record<string, any> = buildResultPayload(call, lead, sentAt, st?.max_attempts ?? null);
+  let body = JSON.stringify(payload);
   const ts = String(Math.floor(Date.now() / 1000));
   const attempts = (call.sync_attempts ?? 0) + 1;
   let error: string | null = null;
@@ -180,12 +186,25 @@ export async function deliverResult(db: SupabaseClient, callId: string) {
     };
     if (t.key) headers["X-API-Key"] = t.key;
     if (t.secret) headers["X-AICall-Signature"] = sign(t.secret, ts, body);
-    const res = await fetch(t.url, {
-      method: "POST",
-      headers,
-      body,
-      signal: AbortSignal.timeout(10_000),
-    });
+    const send = () => fetch(t.url, { method: "POST", headers, body, signal: AbortSignal.timeout(10_000) });
+    let res = await send();
+    // หลังบ้านยังไม่รองรับ "ยังไม่แน่นอน" (ยังไม่ได้ลง patch) →
+    // 1) ตั้งผ่านบัญชี AI Call เหมือนคนในทีมกดปุ่มเอง (ยังไม่แน่นอน + โทรแล้ว / โทรแล้ว + รอตอบ)
+    // 2) ยังไม่ได้ตั้งบัญชี หรือทำไม่สำเร็จ → ส่ง "ติดต่อไม่ได้" (ลบป้ายกำลังโทรออก ไม่ค้าง)
+    if (res.status === 400 && payload.status === "ยังไม่แน่นอน") {
+      const txt = await res.text().catch(() => "");
+      if (/unsupported status/i.test(txt)) {
+        const viaBot = await botMarkUnsure(lead, call, `AI Call: ${payload.note ?? "ไม่รับสาย"}`).catch((e) => { console.error("botMarkUnsure", e?.message); return false; });
+        if (viaBot) {
+          await db.from("calls").update({ sync_status: "sent", sync_attempts: attempts, synced_at: sentAt, sync_error: "ตั้ง ยังไม่แน่นอน ผ่านบัญชี AI Call (หลังบ้านยังไม่รองรับ)", next_sync_at: null }).eq("id", callId);
+          return;
+        }
+        payload.status = "ติดต่อไม่ได้";
+        body = JSON.stringify(payload);
+        if (t.secret) headers["X-AICall-Signature"] = sign(t.secret, ts, body);
+        res = await send();
+      } else res = new Response(txt, { status: 400 });
+    }
     if (!res.ok) error = `HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 300)}`;
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);

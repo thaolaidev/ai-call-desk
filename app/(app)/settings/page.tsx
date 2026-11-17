@@ -41,6 +41,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     botnoi: !!process.env.BOTNOI_TOKEN,
     voice: !!process.env.VOICE_SERVER_URL && !!process.env.VOICE_SECRET,
     chat: !!process.env.CHAT_API_KEY,
+    chatBot: !!(process.env.AI_CALL_BOT_USERNAME && process.env.AI_CALL_BOT_PASSWORD),
   };
   const callbackUrl = `${site}/api/yalecom/callback${process.env.YALECOM_CALLBACK_TOKEN ? "?token=<YALECOM_CALLBACK_TOKEN>" : ""}`;
 
@@ -158,6 +159,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <dt>CRON_SECRET</dt><dd>{env.cron ? "ตั้งแล้ว" : "ยังไม่ตั้ง"}</dd>
               <dt>INGEST_API_KEY</dt><dd>{env.ingest ? "ตั้งแล้ว" : "ยังไม่ตั้ง"}</dd>
               <dt>รับห้องจากแชท (CHAT_API_KEY)</dt><dd>{env.chat ? `ตั้งแล้ว · POST ${site}/api/chat/push` : "ยังไม่ตั้ง"}</dd>
+              <dt>บัญชี AI Call ในแชท</dt><dd>{env.chatBot ? "ตั้งแล้ว · ไม่รับสาย = ยังไม่แน่นอน + โทรแล้ว" : "ยังไม่ตั้ง (AI_CALL_BOT_USERNAME / AI_CALL_BOT_PASSWORD) · ไม่รับสาย = ลบป้ายกำลังโทร"}</dd>
             </dl>
           </div>
         </div>
