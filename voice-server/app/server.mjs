@@ -640,6 +640,23 @@ export function parseRoomsText(text) {
   return out;
 }
 
+/** รูปสุดท้ายของอัลบั้มเดียวกัน (กติกาเดียวกับหน้าแชท: รหัสชุดเดียวกัน หรือรูปถัดไปของคนเดิมที่ไม่มีคำบรรยาย ห่างกันไม่เกิน 2 นาที) */
+async function albumLast(pool, m) {
+  const { rows } = await pool.query(
+    `SELECT id, sender_user_id, kind, created_at, body->>'batch' AS batch, COALESCE(BTRIM(body->>'text'), '') AS text,
+            body->>'reply_to' AS reply_to, body->'deleted' IS NOT NULL AS deleted
+       FROM chat_message WHERE group_id = $1 AND id > $2 ORDER BY id LIMIT 30`, [m.group_id, m.id]);
+  let last = { id: Number(m.id), at: new Date(m.created_at).getTime(), batch: m.batch };
+  for (const r of rows) {
+    const at = new Date(r.created_at).getTime();
+    const same = r.kind === "attachment" && !r.deleted && !r.reply_to && String(r.sender_user_id) === String(m.sender_user_id) && at - last.at <= 120_000
+      && (last.batch && r.batch ? r.batch === last.batch : !r.text);
+    if (!same) break;
+    last = { id: Number(r.id), at, batch: r.batch };
+  }
+  return last.id;
+}
+
 if (CAP.db && CAP.groups.length && CAP.key && CAP.push) {
   (async () => {
     let pg;
@@ -657,11 +674,12 @@ if (CAP.db && CAP.groups.length && CAP.key && CAP.push) {
     setInterval(async () => {
       if (busy) return; busy = true;
       try {
-        const top = await pool.query("SELECT COALESCE(MAX(id), 0)::bigint AS id FROM chat_message");
+        // รอให้ข้อความเก่ากว่า 15 วินาทีก่อน (รูปในอัลบั้มเดียวกันอัปโหลดทีละรูป ต้องครบทั้งชุดก่อน)
+        const top = await pool.query("SELECT COALESCE(MAX(id), 0)::bigint AS id FROM chat_message WHERE created_at < NOW() - INTERVAL '15 seconds'");
         const maxId = Number(top.rows?.[0]?.id ?? last);
         let failed = false;
         const { rows } = await pool.query(
-          `SELECT m.id, g.uuid::text AS group_uuid, m.body->>'text' AS text,
+          `SELECT m.id, m.group_id, m.sender_user_id, m.created_at, m.body->>'batch' AS batch, g.uuid::text AS group_uuid, m.body->>'text' AS text,
                   COALESCE(NULLIF(BTRIM(u.first_name_th), ''), u.username) AS by_name
              FROM chat_message m
              JOIN chat_group g ON g.id = m.group_id
@@ -672,7 +690,9 @@ if (CAP.db && CAP.groups.length && CAP.key && CAP.push) {
         for (const m of rows) {
           const rooms = parseRoomsText(m.text);
           if (rooms.length) {
-            const payload = rooms.map((r, i) => ({ id: `msg-${m.id}-${i + 1}`, condo_name: r.condo, phone: r.phone, message_id: Number(m.id), ...(r.price != null ? { price: r.price } : {}) }));
+            // อัลบั้มหลายรูป: ปุ่มสถานะในแชทอยู่ใต้ "รูปสุดท้าย" ของอัลบั้ม (คำบรรยายอยู่รูปแรก) → ผูกกับรูปสุดท้าย
+            const target = await albumLast(pool, m).catch(() => Number(m.id));
+            const payload = rooms.map((r, i) => ({ id: `msg-${target}-${i + 1}`, condo_name: r.condo, phone: r.phone, message_id: target, ...(r.price != null ? { price: r.price } : {}) }));
             const res = await fetch(CAP.push, {
               method: "POST", headers: { "Content-Type": "application/json", "X-API-Key": CAP.key },
               body: JSON.stringify({ group_uuid: m.group_uuid, requested_by: m.by_name ?? "ผู้ใช้", rooms: payload }),

@@ -235,6 +235,22 @@ export async function deliverResult(db: SupabaseClient, callId: string) {
 }
 
 /**
+ * เรียกทุก 30 วินาที (ชีพจรจาก server เสียง): ส่งผลของห้องจากแชทที่ยังค้าง/ถึงเวลาส่งซ้ำ ให้การ์ด/ปุ่มในแชทอัปเดตภายใน 1 นาที
+ * (ไม่รอรอบใหญ่ — cron ของ Vercel รันวันละครั้ง) · ข้ามสายที่เพิ่งจบไม่ถึง 20 วินาที (กำลังส่งอยู่แล้ว)
+ */
+export async function resendDueChat(db: SupabaseClient, limit = 10) {
+  if (!target()) return 0;
+  const now = new Date();
+  const { data } = await db.from("calls").select("id")
+    .eq("sync_status", "pending").eq("state", "ended").eq("via_chat", true)
+    .lt("ended_at", new Date(now.getTime() - 20_000).toISOString())
+    .or(`next_sync_at.is.null,next_sync_at.lte.${now.toISOString()}`)
+    .order("ended_at").limit(limit);
+  for (const c of data ?? []) await deliverResult(db, c.id).catch(() => null);
+  return data?.length ?? 0;
+}
+
+/**
  * เรียกทุก tick: ส่งผลที่ค้างกลับ VPS เป็นรอบ ทุก sync_every_min นาที (ค่าเริ่มต้น 30)
  * ส่งครั้งละไม่เกิน limit สาย ถ้ายังเหลือ tick ถัดไปจะส่งต่อทันที
  */

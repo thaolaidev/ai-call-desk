@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchChat, pruneWaiting } from "@/lib/chat";
+import { resendDueChat } from "@/lib/sync";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -17,5 +18,6 @@ export async function POST(req: NextRequest) {
   const { data: s } = await db.from("settings").select("*").eq("id", 1).single();
   const pruned = await pruneWaiting(db, s, 25_000).catch(() => 0);
   const d = await dispatchChat(db, s).catch((e) => ({ started: 0, errors: [String(e)] }));
-  return NextResponse.json({ pruned, started: d.started, errors: d.errors });
+  const resent = await resendDueChat(db).catch(() => 0);
+  return NextResponse.json({ pruned, started: d.started, resent, errors: d.errors });
 }
