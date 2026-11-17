@@ -107,6 +107,7 @@ export async function POST(req: NextRequest) {
       accepted_after_rules: live.accepted_after_rules ?? null,
       nationality_told: live.nationality_told ?? null,
       pet_friendly: typeof live.pet_friendly === "boolean" ? live.pet_friendly : null,
+      pet_note: live.pet_note ?? null,
       foreign_exclude: Array.isArray(live.foreign_exclude) ? live.foreign_exclude.join(", ") : (full?.details as any)?.excluded_nationalities ?? null,
       current_lease_until: full?.current_lease_until ?? null,
       summary_th: full?.summary ?? null,

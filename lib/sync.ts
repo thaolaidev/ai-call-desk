@@ -76,7 +76,7 @@ export function buildResultPayload(call: any, lead: any, sentAt = new Date().toI
     status === "ว่าง" && a.ready_now === true ? "พร้อมเข้าอยู่" : "",
     availText ? `${status === "ไม่ว่าง" ? "จะว่าง" : "เข้าได้"} ${availText}` : "",
     a.owner_price ? `เจ้าของแจ้งราคา ${fmt(a.owner_price)}` : a.price_confirmed === true && lead?.rent ? `ยืนยันราคา ${fmt(lead.rent)}` : "",
-    a.pet_friendly === true ? "เลี้ยงสัตว์ได้" : a.pet_friendly === false ? "เลี้ยงสัตว์ไม่ได้" : "",
+    a.pet_friendly === true ? (a.pet_note ? `เลี้ยงสัตว์ได้ (${a.pet_note})` : "เลี้ยงสัตว์ได้") : a.pet_friendly === false ? "เลี้ยงสัตว์ไม่ได้" : "",
     call.outcome === "avail" && willRetry ? "ยังไม่ได้ถามเรื่องต่างชาติ · AI จะโทรถามอีกครั้ง" : "",
     a.needs_review ? "⚠️ ควรฟังเสียงซ้ำ" : "",
   ].filter(Boolean).join(" · ");
@@ -85,7 +85,7 @@ export function buildResultPayload(call: any, lead: any, sentAt = new Date().toI
   const addOn = [
     call.outcome === "avail" && willRetry ? "AI จะโทรถามเรื่องต่างชาติอีกครั้ง" : "",
     a.foreign_exclude && !String(call.summary ?? "").includes(String(a.foreign_exclude).split(",")[0]) ? `ไม่รับ ${a.foreign_exclude}` : "",
-    a.pet_friendly === true && !/สัตว์/.test(String(call.summary ?? "")) ? "เลี้ยงสัตว์ได้" : "",
+    a.pet_friendly === true && !/สัตว์|หมา|แมว/.test(String(call.summary ?? "")) ? (a.pet_note ? `เลี้ยงสัตว์ได้ (${a.pet_note})` : "เลี้ยงสัตว์ได้") : "",
   ].filter(Boolean).join(" · ");
   const note = status
     ? (call.summary ? [call.summary, addOn].filter(Boolean).join(" · ") : short || null)

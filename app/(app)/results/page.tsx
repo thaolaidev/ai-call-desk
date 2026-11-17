@@ -34,7 +34,7 @@ const NOT_REACHED = ["noanswer", "invalid"];
 const SYNC_LABEL: Record<string, string> = { sent: "ยิงกลับ VPS แล้ว", pending: "รอยิงกลับ VPS", failed: "ยิงกลับ VPS ไม่สำเร็จ", skipped: "ไม่ต้องยิงกลับ" };
 
 const FIELD_LABEL: Record<string, string> = {
-  needs_review: "⚠️ ต้องตรวจ", room_available: "ห้องว่าง", ready_now: "พร้อมเข้าอยู่เลย", available_from: "ว่างตั้งแต่", price_confirmed: "ยืนยันราคาเดิม", owner_price: "ราคาที่เจ้าของบอก (บาท)", accepts_foreigners: "รับต่างชาติ", rules_explained: "อธิบายกฎแล้ว", owner_agreed_profile: "ยอมดูโปรไฟล์", nationality_told: "สัญชาติที่บอกเจ้าของ", foreign_exclude: "ไม่รับสัญชาติ", pet_friendly: "เลี้ยงสัตว์ได้", call_kind: "ลักษณะสาย", accepted_after_rules: "รับต่างชาติหลังฟังกฎ",
+  needs_review: "⚠️ ต้องตรวจ", room_available: "ห้องว่าง", ready_now: "พร้อมเข้าอยู่เลย", available_from: "ว่างตั้งแต่", price_confirmed: "ยืนยันราคาเดิม", owner_price: "ราคาที่เจ้าของบอก (บาท)", accepts_foreigners: "รับต่างชาติ", rules_explained: "อธิบายกฎแล้ว", owner_agreed_profile: "ยอมดูโปรไฟล์", nationality_told: "สัญชาติที่บอกเจ้าของ", foreign_exclude: "ไม่รับสัญชาติ", pet_friendly: "เลี้ยงสัตว์ได้", pet_note: "สัตว์ที่รับ", call_kind: "ลักษณะสาย", accepted_after_rules: "รับต่างชาติหลังฟังกฎ",
   profile_channel: "ส่งโปรไฟล์ทาง", line_id: "LINE ID", nationality_note: "เงื่อนไขสัญชาติ", current_lease_until: "ผู้เช่าเดิมถึง",
   callback_at: "นัดโทรกลับ", owner_questions: "คำถามที่ต้องตอบต่อ", sentiment: "ท่าทีเจ้าของ",
   answer_text: "คำตอบที่ถอดได้", transcript_full: "ข้อความทั้งหมด",

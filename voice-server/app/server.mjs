@@ -269,7 +269,8 @@ const KINDS = {
   price: 'ราคาห้องตามที่บอทพูดถูกไหม → intent: "yes" | "no" | "unclear" · ถ้าเจ้าของบอกราคาใหม่ ใส่ owner_price (ตัวเลขบาท)',
   foreign: 'เจ้าของรับลูกค้าต่างชาติไหม → intent: "yes" (รับ · รวมถึงไม่รับแค่บางสัญชาติ เช่น "ไม่รับจีนกับอินเดีย" = รับชาติอื่น ให้ใส่ excluded_nationalities) | "no" (ไม่รับต่างชาติเลย/รับแต่คนไทย) | "ask" (ยังไม่ตอบว่ารับไหม แต่ถามกลับว่าลูกค้าชาติไหน เช่น "ชาติไหน" "คนที่ไหน") | "unclear" · asks_nationality = true ถ้าเจ้าของถามว่าผู้เช่า/ลูกค้าชาติไหน (ทั้งกรณี ask และ yes)',
   rules: 'บอทเพิ่งอธิบายกฎตรวจห้องของบริษัท เจ้าของเปลี่ยนใจรับลูกค้าต่างชาติไหม → intent: "yes" (โอเค/รับได้/ถ้าแบบนี้รับ) | "no" (ยังไม่รับ/รับแต่คนไทย) | "unclear" (แค่รับฟัง เช่น ค่ะ ครับ อืม)',
-  pet: 'ห้องนี้เลี้ยงสัตว์ได้ไหม → intent: "yes" (ได้/เลี้ยงได้/สัตว์เล็กได้) | "no" (ไม่ได้/ห้ามเลี้ยง/นิติไม่ให้) | "unclear"',
+  pet: 'รับสัตว์เลี้ยงไหม → intent: "yes" (รับ/ได้/เลี้ยงได้/สัตว์เล็กได้/รับแค่แมว) | "no" (ไม่รับ/ไม่ได้/ห้ามเลี้ยง/นิติไม่ให้) | "unclear"',
+  pet_kind: 'รับทั้งหมาและแมวไหม → intent: "yes" (ได้ทั้งคู่) | "no" (ไม่ได้ทั้งคู่ / รับแค่อย่างใดอย่างหนึ่ง) | "unclear" · ถ้ารับแค่บางชนิด ให้ text บอกชนิดที่รับตามที่เจ้าของพูด',
   profile: 'ให้แอดมินส่งโปรไฟล์ลูกค้าให้พิจารณาก่อนดีไหม → intent: "yes" (ได้/ส่งมาได้/ลองดู) | "no" (ไม่ต้อง/ไม่รับ/ไม่สนใจ) | "unclear"',
 };
 
@@ -283,6 +284,8 @@ const NEG = {
 function checkText(kind, text, intent) {
   // ต่างชาติ: "ไม่รับจีนกับอินเดีย" = รับชาติอื่น → yes (ไม่ใช่ no)
   if (kind === "foreign" && partialForeign(text).length) return "yes";
+  // สัตว์เลี้ยง: "หมาไม่ได้ แมวได้" = รับ (บางชนิด) ไม่ใช่ไม่รับ
+  if (kind === "pet" && petOnly(text)) return "yes";
   const re = NEG[kind];
   // ห้องว่างไหม: ถ้าข้อความบอกชัดว่ามีผู้เช่าแล้ว/ไม่ว่าง แต่ AI ตีเป็น "ฟังไม่ชัด" หรือถามกลับ → ถือว่าไม่ว่าง
   if (kind === "avail" && re && ["unclear", "ask_price", "ask_condo"].includes(intent) && re.test(text.replace(/\s+/g, "")) && !/ยังว่าง|ว่างอยู่|ว่างค่ะ|ว่างครับ/.test(text.replace(/\s+/g, ""))) return "no";
@@ -307,6 +310,18 @@ function excludedFrom(kind, text, fromModel) {
   if (kind !== "foreign") return null;
   const list = [...new Set([...(Array.isArray(fromModel) ? fromModel.map(String) : []), ...partialForeign(text)])].filter(Boolean);
   return list.length ? list : null;
+}
+
+/** "รับแต่แมว" / "หมาไม่ได้ แมวได้" → "รับแค่แมว" · ไม่ระบุชนิด = null */
+function petOnly(text) {
+  const s = String(text ?? "").replace(/\s+/g, "");
+  const cat = /แมว/.test(s), dog = /หมา|สุนัข/.test(s);
+  const noDog = /(ไม่รับ|ไม่ได้|ห้าม)(หมา|สุนัข)|(หมา|สุนัข)(ไม่ได้|ไม่รับ)/.test(s);
+  const noCat = /(ไม่รับ|ไม่ได้|ห้าม)แมว|แมว(ไม่ได้|ไม่รับ)/.test(s);
+  if (cat && (noDog || (/(แต่|แค่|เฉพาะ)แมว|แมว(อย่างเดียว|เท่านั้น)/.test(s) && !dog))) return "รับแค่แมว";
+  if (dog && (noCat || (/(แต่|แค่|เฉพาะ)(หมา|สุนัข)|(หมา|สุนัข)(อย่างเดียว|เท่านั้น)/.test(s) && !cat))) return "รับแค่หมา";
+  if (/สัตว์เล็ก/.test(s)) return "รับเฉพาะสัตว์เล็ก";
+  return null;
 }
 
 /** เจ้าของถามว่าใครโทรมา / เป็นใคร / โทรจากไหน / เป็น AI หรอ */
@@ -401,12 +416,13 @@ async function runFlow(s) {
     }
     return a;
   };
-  const live = (s.live = { outcome: "unclear", ready_now: null, available_from: null, price_confirmed: null, owner_price: null, accepts_foreigners: null, owner_agreed_profile: null, nationality_told: null, accepted_after_rules: null, pet_friendly: null });
+  const live = (s.live = { outcome: "unclear", ready_now: null, available_from: null, price_confirmed: null, owner_price: null, accepts_foreigners: null, owner_agreed_profile: null, nationality_told: null, accepted_after_rules: null, pet_friendly: null, pet_note: null });
 
-  // ทักทาย 3 ท่อน เว้นท่อนละ 1 วินาที (ให้เจ้าของตั้งตัว) · ยังไม่มีไฟล์ท่อนใหม่ = ใช้ไฟล์ 01 เดิม
+  // ทักทาย: "ฮัลโหล สวัสดีค่ะ ดิฉันเป็น AI Agent มีลูกค้าสนใจจะนัดชมห้องค่ะ" (ต่อกันเลย) · เว้น 1 วิ · "ดิฉันโทรจากบริษัทเท่าไหร่ดอทคอมค่ะ"
+  // ยังไม่มีไฟล์ท่อนใหม่ = ใช้ไฟล์ 01 เดิม
   const gap = (ms) => new Promise((r) => setTimeout(r, ms));
   if (s.snd["01-1"]) {
-    await P("01-1"); if (s.gone) return; await gap(1000);
+    await P("01-1"); if (s.gone) return;
     await P("01-2"); if (s.gone) return; await gap(1000);
     await P("01-3");
   } else await play(s, s.snd["01"]);
@@ -475,6 +491,17 @@ async function runFlow(s) {
     if (pt.intent === "hangup" || s.gone) return;
     if (pt.intent === "yes") live.pet_friendly = true;
     if (pt.intent === "no") live.pet_friendly = false;
+    // รับสัตว์เลี้ยง → ถามต่อว่ารับทั้งหมาและแมวไหม
+    if (pt.intent === "yes") {
+      const only = petOnly(pt.text); // ตอบมาเองแล้ว เช่น "รับแต่แมว"
+      if (only) live.pet_note = only;
+      else if (s.on("10-1")) {
+        const pk = await ask("pet_kind", Q("10-1"), () => P("10-1"));
+        if (pk.intent === "hangup" || s.gone) return;
+        if (pk.intent === "yes") live.pet_note = "รับทั้งหมาและแมว";
+        else if (pk.intent === "no") live.pet_note = petOnly(pk.text) ?? "ไม่ได้รับทั้งหมาและแมว";
+      }
+    }
   }
 
   // ต่างชาติ
