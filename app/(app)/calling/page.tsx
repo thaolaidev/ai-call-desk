@@ -28,7 +28,17 @@ function waitLabel(l: any, max: number) {
   return `${RETRY_WHY[l.status] ?? l.status} · ${when} (ครั้งที่ ${(l.attempts ?? 0) + 1}/${max})`;
 }
 
-export default async function CallingPage() {
+const QPAGE = 20; // คิวรอโทร: หน้าละกี่ห้อง
+
+export default async function CallingPage({ searchParams }: { searchParams: Promise<{ qn?: string; qo?: string }> }) {
+  const sp = await searchParams;
+  // หน้าของคิวแต่ละห้อง (qn = Check ทรัพย์ใหม่, qo = Check สถานะห้อง)
+  const qpage: Record<string, number> = { new: Math.max(1, Number(sp.qn) || 1), old: Math.max(1, Number(sp.qo) || 1) };
+  const qhref = (seg: string, n: number) => {
+    const p = new URLSearchParams({ ...(sp.qn ? { qn: sp.qn } : {}), ...(sp.qo ? { qo: sp.qo } : {}), [seg === "new" ? "qn" : "qo"]: String(n) });
+    for (const [k, v] of [...p.entries()]) if (v === "1") p.delete(k);
+    return `/calling${p.size ? `?${p}` : ""}#queue-${seg}`;
+  };
   const sb = await createClient();
   const { from, to } = todayRangeBKK();
   const now = new Date().toISOString();
@@ -44,7 +54,8 @@ export default async function CallingPage() {
         .eq("segment", seg)
         .not("chat_requested_at", "is", null)
         .in("status", ["queued", "noanswer", "unclear", "callback"])
-        .order("next_call_at", { ascending: true, nullsFirst: true }).order("chat_requested_at").limit(10),
+        .order("next_call_at", { ascending: true, nullsFirst: true }).order("chat_requested_at")
+        .range((qpage[seg] - 1) * QPAGE, qpage[seg] * QPAGE - 1),
     ]),
   ]);
   if (error || !s) return <div className="view"><p className="banner err">{error?.message ?? "ไม่พบ settings"}</p></div>;
@@ -131,11 +142,11 @@ export default async function CallingPage() {
                 </details>
 
                 <div className="card">
-                  <div className="card-h"><h3>คิวรอโทร</h3><span className="hint">{waitN} ห้อง</span></div>
-                  {queue.length > 0 ? queue.map((l) => (
+                  <div className="card-h" id={`queue-${seg}`}><h3>คิวรอโทร</h3><span className="hint">{waitN} ห้อง</span></div>
+                  {queue.length > 0 ? queue.map((l, i) => (
                     <div className="q-row" key={l.id}>
                       <div className="q-main">
-                        <b>{l.code ? <span className="mono">{l.code} </span> : null}{l.condo}</b>
+                        <b><span className="q-no">{(qpage[seg] - 1) * QPAGE + i + 1}.</span> {l.code ? <span className="mono">{l.code} </span> : null}{l.condo}</b>
                         <span className="small muted">
                           <span className="mono">{prettyPhone(l.phone)}</span> · {l.chat_requested_by ?? "-"} {fmtTime(l.chat_requested_at)} · {waitLabel(l, s.max_attempts ?? 3)}
                         </span>
@@ -159,7 +170,13 @@ export default async function CallingPage() {
                       <input type="hidden" name="all" value="1" />
                       <input type="hidden" name="segment" value={seg} />
                       <button className="btn sm stop">ลบทั้งคิว ({waitN} ห้อง)</button>
-                      {waitN > queue.length && <span className="small muted">แสดง {queue.length} ห้องแรก</span>}
+                      {waitN > QPAGE && (
+                        <span className="q-pager">
+                          {qpage[seg] > 1 ? <Link className="btn sm" href={qhref(seg, qpage[seg] - 1)}>‹ ก่อนหน้า</Link> : <span className="btn sm" aria-disabled="true">‹ ก่อนหน้า</span>}
+                          <span className="small muted">หน้า {qpage[seg]} / {Math.max(1, Math.ceil(waitN / QPAGE))} · ห้องที่ {(qpage[seg] - 1) * QPAGE + 1}–{Math.min(waitN, qpage[seg] * QPAGE)}</span>
+                          {qpage[seg] * QPAGE < waitN ? <Link className="btn sm" href={qhref(seg, qpage[seg] + 1)}>ถัดไป ›</Link> : <span className="btn sm" aria-disabled="true">ถัดไป ›</span>}
+                        </span>
+                      )}
                     </form>
                   )}
                 </div>

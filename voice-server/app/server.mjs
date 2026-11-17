@@ -778,7 +778,7 @@ if (CAP.db && CAP.groups.length && CAP.key && CAP.push) {
               signal: AbortSignal.timeout(45_000),
             }).catch((e) => ({ ok: false, status: 0, text: async () => e.message }));
             const j = res.ok ? await res.json().catch(() => ({})) : null;
-            log("caption push", m.id, rooms.map((r) => `${r.phone} ${r.condo}`).join(" | "), res.ok ? `queued ${j?.queued ?? 0} started ${j?.started ?? 0}` : `ERR ${res.status} ${(await res.text().catch(() => "")).slice(0, 120)}`);
+            log("caption push", m.id, rooms.map((r) => `${r.phone} ${r.condo}`).join(" | "), res.ok ? `queued ${j?.queued ?? 0} started ${j?.started ?? 0}${j?.waiting ? ` (${j.waiting})` : ""}${(j?.rooms ?? []).filter((x) => x.state === "skipped").map((x) => ` · ข้าม: ${x.reason}`).join("")}` : `ERR ${res.status} ${(await res.text().catch(() => "")).slice(0, 120)}`);
             if (!res.ok && res.status !== 400) { failed = true; break; } // เว็บล่ม → ลองใหม่รอบหน้า (ไม่ขยับ last)
           }
           last = Number(m.id);
