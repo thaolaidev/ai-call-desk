@@ -71,11 +71,13 @@ export async function POST(req: NextRequest) {
   const answers: any[] = Array.isArray(r.answers) ? r.answers : [];
   // ตรวจซ้ำกับข้อความจริง: ผลออกมา "ว่าง" แต่คำตอบเรื่องห้องว่าง หรือสรุปของ AI บอกว่าไม่ว่าง → ใช้ "ไม่ว่าง" และให้ฟังซ้ำ
   const availText = [...answers].reverse().find((a) => a.step === "avail" && a.text)?.text ?? "";
-  const NEG_AVAIL = /ไม่ว่าง|ไม่ได้ว่าง|มีคน(เช่า|อยู่|จอง)|เช่า(ไป)?แล้ว|ขาย(ไป)?แล้ว|ปล่อย(ไป)?แล้ว|ไม่มีห้อง|ติดผู้เช่า/;
-  const NEG_SUMMARY = /ห้อง(ยัง)?ไม่ว่าง|ไม่ว่างแล้ว|แจ้งว่าไม่ว่าง|ตอบว่าไม่ว่าง|มี(คน|ผู้)เช่าแล้ว/;
+  const NEG_AVAIL = /ไม่ว่าง|ไม่ได้ว่าง|มี(คน|ผู้)(เช่า|อยู่|จอง)|ผู้เช่า(อยู่|แล้ว)|เช่า(ไป)?แล้ว|ขาย(ไป)?แล้ว|ปล่อย(ไป)?แล้ว|ไม่มีห้อง|ติด(ผู้เช่า|สัญญา|จอง)|จองแล้ว/;
+  const NEG_SUMMARY = /ห้อง(ยัง)?ไม่ว่าง|ไม่ว่างแล้ว|แจ้งว่าไม่ว่าง|ตอบว่าไม่ว่าง|มี(คน|ผู้)เช่า(แล้ว|อยู่)/;
   const textSaysNo = NEG_AVAIL.test(availText.replace(/\s+/g, "")) || NEG_SUMMARY.test(String(full?.summary ?? "").replace(/\s+/g, ""));
   const textConflict = groupOf(outcome) === "avail" && textSaysNo;
   if (textConflict) outcome = "not_avail";
+  // ฟังไม่ชัด แต่คำตอบเรื่องห้องว่างบอกชัดว่ามีผู้เช่าแล้ว/ไม่ว่าง → ไม่ว่าง
+  if (outcome === "unclear" && NEG_AVAIL.test(availText.replace(/\s+/g, ""))) outcome = "not_avail";
   // ยังไม่ได้คำตอบเรื่องห้องว่างจริง (เจ้าของวางสาย / ถามกลับ / ไม่ตอบ) แต่ AI ฟังทั้งสายสรุปว่า "ว่าง"
   // → ไม่เชื่อ (อาจเดาจากคำพูดของบอทเอง) ให้เป็น "ไม่ได้คำตอบ" แล้วโทรซ้ำตามรอบ
   const availAnswered = answers.some((a) => a.step === "avail" && (a.intent === "yes" || a.intent === "no"));
