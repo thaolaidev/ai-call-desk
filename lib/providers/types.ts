@@ -3,7 +3,7 @@ export type StartArgs = {
   lead: {
     id: string; owner_name: string; phone: string; condo: string; unit: string | null; rent: number | null;
     customer_nationalities: string | null; viewing_when: string | null; external_id?: string | null;
-    segment?: string | null; condo_id?: string | null;
+    segment?: string | null; condo_id?: string | null; pet_friendly?: boolean | null;
   };
   settings: {
     company: string; default_nationalities: string; viewing_when: string;

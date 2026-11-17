@@ -116,7 +116,8 @@ export function buildResultPayload(call: any, lead: any, sentAt = new Date().toI
     // ห้องว่างที่ยังไม่รู้เรื่องต่างชาติ ก็ "รอโทรซ้ำ" ด้วย (AI จะโทรถามอีกครั้ง)
     retry: willRetry && (!status || call.outcome === "avail"),
     call_kind: callKind(call) || null,
-    pet_friendly: typeof a.pet_friendly === "boolean" ? a.pet_friendly : null,
+    // จากสาย หรือจากฟอร์มห้องชมพู (Pet : Yes/No) — ส่งทุกครั้งแม้ไม่รับสาย ให้ปุ่ม Pet friendly อัปเดต
+    pet_friendly: typeof a.pet_friendly === "boolean" ? a.pet_friendly : typeof lead.pet_friendly === "boolean" ? lead.pet_friendly : null,
     status_updated_at: status ? sentAt : null,
     previous_status: lead.vps_status ?? null,
     note,

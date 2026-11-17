@@ -114,6 +114,11 @@ export async function POST(req: NextRequest) {
         : db.from("leads").update(patch).eq("phone", normalizePhone(String(r.phone))).ilike("condo", String(r.condo_name ?? r.condo ?? ""));
       const { error } = await q;
       if (error) Object.assign(row, { state: "skipped", reason: error.message });
+      // ฟอร์มห้องชมพู "Pet : Yes/No" → จำไว้กับห้อง: บอทไม่ต้องถามเรื่องสัตว์เลี้ยง และส่งผลกลับไปตั้งปุ่ม Pet friendly
+      // (คอลัมน์จาก update_0019_pet.sql — ยังไม่ได้รัน = ข้ามเงียบๆ)
+      if (!error && typeof r.pet_friendly === "boolean" && r.id != null) {
+        await db.from("leads").update({ pet_friendly: r.pet_friendly }).eq("external_id", String(r.id)).then(() => null, () => null);
+      }
     }
     // ห้องที่ระบบไม่ยอมเข้าคิว (เช่น เคยโทรแล้วเบอร์ผิด) แจ้งกลับให้รู้
     const qIds = result.filter((x) => x.state === "queued" && x.id).map((x) => x.id as string);

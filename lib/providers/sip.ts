@@ -35,6 +35,8 @@ export const sipProvider: CallProvider = {
         call_id: callId,
         phone: lead.phone,
         mode: "full", // ทั้งห้องทรัพย์ใหม่และทรัพย์เดิมใช้บทโทรชุดเดียวกัน
+        // รู้แล้วจากฟอร์ม (Pet : Yes/No) → บอทข้ามคำถามเลี้ยงสัตว์
+        pet_known: typeof lead.pet_friendly === "boolean" ? lead.pet_friendly : null,
         audio,
         enabled: playlist.filter((p) => p.enabled).map((p) => p.key),
         titles: Object.fromEntries(Object.values(STEPS).map((s) => [s.key, s.text])),

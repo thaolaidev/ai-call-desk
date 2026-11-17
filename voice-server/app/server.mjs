@@ -469,7 +469,8 @@ async function runFlow(s) {
   if (s.gone) return;
 
   // สัตว์เลี้ยง (ถามเมื่อมีไฟล์เสียงท่อน 10 "เลี้ยงสัตว์ได้ไหมคะ") → ปุ่ม Pet friendly ในแชท
-  if (s.on("10")) {
+  if (typeof s.petKnown === "boolean") live.pet_friendly = s.petKnown; // รู้จากฟอร์มแล้ว ไม่ถาม
+  else if (s.on("10")) {
     const pt = await ask("pet", Q("10"), () => P("10"));
     if (pt.intent === "hangup" || s.gone) return;
     if (pt.intent === "yes") live.pet_friendly = true;
@@ -802,7 +803,7 @@ async function startCall(body) {
   // แล้วค่อยเตรียมไฟล์เสียง + โทรออกเบื้องหลัง · ล้มเหลว = แจ้งเว็บเป็นผลโทร "error"
   const id = `tl-${callId}`;
   const enabled = new Set(body.enabled ?? []);
-  const s = { id, callId, mode: body.mode === "short" ? "short" : "full", turn: 0, answers: [], pending: new Set(), snd: {}, title: body.titles ?? {}, on: (k) => (body.enabled ? enabled.has(k) : true) && !!s.snd[k], started: false, answered: false, gone: false, talkStarts: [], qStart: 0 };
+  const s = { id, callId, mode: body.mode === "short" ? "short" : "full", turn: 0, answers: [], pending: new Set(), snd: {}, title: body.titles ?? {}, petKnown: typeof body.pet_known === "boolean" ? body.pet_known : null, on: (k) => (body.enabled ? enabled.has(k) : true) && !!s.snd[k], started: false, answered: false, gone: false, talkStarts: [], qStart: 0 };
   sessions.set(id, s); // จองที่ไว้ก่อน (นับจำนวนสายพร้อมกัน)
   dial(s, body, number).catch(async (err) => {
     log(callId, "start failed", err.message);
