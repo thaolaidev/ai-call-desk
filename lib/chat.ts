@@ -84,11 +84,37 @@ export async function pruneHandled(db: SupabaseClient, s: any, leads: any[]): Pr
   return removed;
 }
 
+/**
+ * กู้ห้องที่ค้าง: (1) สถานะ "กำลังโทร" แต่ไม่มีสายที่ทำงานอยู่จริงเกิน 3 นาที (เช่น ระบบล่มกลางทาง) → กลับเข้าคิว
+ * (2) ห้องจากแชทที่สถานะรอโทรแต่หลุดจากคิวแชท → ใส่กลับเข้าคิว
+ */
+export async function rescueStuck(db: SupabaseClient) {
+  const cutoff = new Date(Date.now() - 3 * 60_000).toISOString();
+  let fixed = 0;
+  const { data: stuck } = await db.from("leads").select("id, attempts, prev_status, chat_requested_at").eq("status", "calling").lt("updated_at", cutoff).limit(50);
+  for (const l of stuck ?? []) {
+    const { data: busy } = await db.from("calls").select("id").eq("lead_id", l.id)
+      .or(`state.in.(${IN_FLIGHT.join(",")}),started_at.gte.${cutoff}`).limit(1);
+    if (busy?.length) continue;
+    const retry = (l.attempts ?? 0) > 0;
+    const status = l.chat_requested_at ? (retry ? "noanswer" : "queued") : (l.prev_status && l.prev_status !== "calling" ? l.prev_status : "queued");
+    await db.from("leads").update({ status, next_call_at: retry ? new Date().toISOString() : null }).eq("id", l.id).eq("status", "calling");
+    fixed++;
+  }
+  const { data: lost } = await db.from("leads").select("id").eq("status", "queued").is("chat_requested_at", null).not("chat_group_uuid", "is", null).limit(50);
+  if (lost?.length) {
+    await db.from("leads").update({ chat_requested_at: new Date().toISOString() }).in("id", lost.map((x: any) => x.id));
+    fixed += lost.length;
+  }
+  return fixed;
+}
+
 let lastPrune = 0;
 /** ทุก tick และทุก 30 วินาทีจาก server เสียง (ไม่ถี่กว่า 30 วินาที): เช็กห้องที่รอในคิวจากแชท แล้วเอาห้องที่ทีมโทรเองแล้วออก (ทุกโหมด) */
 export async function pruneWaiting(db: SupabaseClient, s?: any, minGapMs = 30_000) {
   if (Date.now() - lastPrune < minGapMs) return 0;
   lastPrune = Date.now();
+  await rescueStuck(db).catch(() => 0);
   const { data } = await db.from("leads").select("id, external_id, chat_requested_at")
     .not("chat_requested_at", "is", null).in("status", ["queued", "noanswer", "unclear", "callback"]).limit(100);
   return (await pruneHandled(db, s, data ?? [])).size;
