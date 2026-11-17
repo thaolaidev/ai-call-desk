@@ -16,7 +16,7 @@ const MAX_ROOMS = 30;
  * ผลการโทรส่งกลับทาง POST {VPS_API_URL}/results ทันทีที่สายจบ (มี chat_group_uuid + asset_uuid ให้ไปอัปเดตการ์ดห้อง)
  */
 /** ชื่อที่จริงๆ เป็นหัวข้อในฟอร์มทรัพย์ใหม่ ไม่ใช่ชื่อคอนโด */
-const FORM_LINE = /^\s*(?:\d+\s*[.)]\s*)?(?:number\s*owner|owner\s*(?:id\s*)?line|name\s*property|room\s*type|type|size|floor|price|pet|code)\b/i;
+const FORM_LINE = /^\s*(?:\d+\s*[.)]\s*)?(?:number\s*owner|owner\s*(?:id\s*)?line|name\s*property|room\s*type|type|size|floor|price|pet|code|phone|tel|project|link|line)\b/i;
 
 export async function POST(req: NextRequest) {
   if (!process.env.CHAT_API_KEY || req.headers.get("x-api-key") !== process.env.CHAT_API_KEY) {
@@ -81,6 +81,7 @@ export async function POST(req: NextRequest) {
     const l: any = id ? byId.get(id) : null;
     // โพสต์ฟอร์มทรัพย์ใหม่ (Name property / Number owner / Type …) = ทีมลงประกาศเอง ไม่ใช่ห้องให้ AI โทร
     // หลังบ้านอ่านชื่อจากบรรทัด "Number owner 1: 08x…" ได้เป็น "Number Owner 1" → ข้าม
+    // ฟอร์มห้องชมพู (Project / Price / Phone / Pet) หลังบ้านอ่านชื่อผิดเป็น "Phone" → ข้าม (server เสียงอ่านฟอร์มนี้แล้วส่งชื่อที่ถูกมาเอง)
     if (String(id ?? "").startsWith("msg-") && FORM_LINE.test(String(r?.typed_condo ?? r?.condo_name ?? r?.condo ?? ""))) {
       result.push({ asset_uuid: asset, id, state: "skipped", reason: "โพสต์ฟอร์มทรัพย์ใหม่ ไม่ต้องโทร" });
       continue;

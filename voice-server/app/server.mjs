@@ -617,6 +617,37 @@ const normPhone = (raw) => {
   return d.length >= 9 && d.length <= 10 && d[0] === "0" ? d : "";
 };
 /** เหมือน ParseAICallText ฝั่งหลังบ้าน: เบอร์บรรทัดเดียว = 1 ห้อง (ชื่อ = บรรทัดแรกที่ไม่ใช่เบอร์/ราคา) · หลายบรรทัดมีเบอร์ = แยกห้อง */
+/**
+ * ฟอร์มห้องชมพู (ทีมพิมพ์แบบมีหัวข้อ):
+ *   Project : Ideo Mobi Asoke
+ *   Price : 15,000
+ *   Phone : 0812345678
+ *   Pet : ได้
+ *   ________________
+ *   Line : …   Link : …
+ * → [{ phone, condo, price, pet }] · ไม่ใช่ฟอร์มนี้ = null (ใช้ parseRoomsText แทน)
+ */
+const LABEL_RE = (k) => new RegExp(`^[ \\t]*(?:${k})[ \\t]*\\d*[ \\t]*[:：][ \\t]*(.*)$`, "im");
+export function parseLabeled(text) {
+  const s = String(text ?? "").replace(/\r/g, "");
+  const project = LABEL_RE("project|โครงการ|คอนโด").exec(s)?.[1]?.trim();
+  const phoneLine = LABEL_RE("phone|tel|เบอร์").exec(s)?.[1] ?? "";
+  if (!project && !phoneLine) return null; // ไม่ใช่ฟอร์มนี้
+  const priceLine = LABEL_RE("price|ราคา").exec(s)?.[1] ?? "";
+  const petLine = (LABEL_RE("pet|สัตว์เลี้ยง").exec(s)?.[1] ?? "").trim().toLowerCase();
+  const m = priceLine.match(/(\d{1,3}(?:,\d{3})+|\d{4,7})|(\d{1,3}(?:\.\d)?)\s*k\b/i);
+  const price = m ? (m[1] ? Number(m[1].replace(/,/g, "")) : Number(m[2]) * 1000) : null;
+  const pet = /^(yes|y|ได้|ok|✅|✔)/.test(petLine) ? true : /^(no|n|ไม่|❌|✖)/.test(petLine) ? false : null;
+  const condo = (project ?? "").replace(/[•|]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!condo) return [];
+  const out = [];
+  for (const raw of phoneLine.match(TXT_PHONE) ?? []) {
+    const phone = normPhone(raw);
+    if (phone && !out.some((r) => r.phone === phone)) out.push({ phone, condo, price: price && price >= 1000 ? price : null, pet });
+  }
+  return out;
+}
+
 export function parseRoomsText(text) {
   const lines = String(text ?? "").replace(/\r/g, "").split("\n").map((line) => {
     const phones = line.match(TXT_PHONE) ?? [];
@@ -700,16 +731,19 @@ if (CAP.db && CAP.groups.length && CAP.key && CAP.push) {
              FROM chat_message m
              JOIN chat_group g ON g.id = m.group_id
              LEFT JOIN "user" u ON u.id = m.sender_user_id
-            WHERE m.id > $1 AND m.id <= $3 AND g.uuid::text = ANY($2) AND m.kind = 'attachment'
+            WHERE m.id > $1 AND m.id <= $3 AND g.uuid::text = ANY($2) AND m.kind IN ('attachment', 'text')
               AND COALESCE(BTRIM(m.body->>'text'), '') <> '' AND m.body->'deleted' IS NULL
             ORDER BY m.id LIMIT 50`, [last, CAP.groups, maxId]);
         for (const m of rows) {
           // โพสต์ฟอร์มทรัพย์ใหม่ (Name property: … / Number owner: …) = ทีมลงประกาศ ไม่ใช่ห้องให้ AI โทร
-          const rooms = INTAKE_FORM.test(m.text) ? [] : parseRoomsText(m.text);
+          // ฟอร์มมีหัวข้อ (Project / Price / Phone / Pet) อ่านด้วย parseLabeled ทั้งข้อความและคำบรรยายใต้รูป
+          // ข้อความธรรมดา (ไม่ใช่ฟอร์ม) หลังบ้านส่งให้เองอยู่แล้ว → ข้าม · รูปที่ไม่ใช่ฟอร์ม → parseRoomsText เหมือนเดิม
+          const labeled = INTAKE_FORM.test(m.text) ? [] : parseLabeled(m.text);
+          const rooms = labeled ?? (m.kind === "attachment" ? parseRoomsText(m.text) : []);
           if (rooms.length) {
             // อัลบั้มหลายรูป: ปุ่มสถานะในแชทอยู่ใต้ "รูปสุดท้าย" ของอัลบั้ม (คำบรรยายอยู่รูปแรก) → ผูกกับรูปสุดท้าย
-            const target = await albumLast(pool, m).catch(() => Number(m.id));
-            const payload = rooms.map((r, i) => ({ id: `msg-${target}-${i + 1}`, condo_name: r.condo, phone: r.phone, message_id: target, ...(r.price != null ? { price: r.price } : {}) }));
+            const target = m.kind === "attachment" ? await albumLast(pool, m).catch(() => Number(m.id)) : Number(m.id);
+            const payload = rooms.map((r, i) => ({ id: `msg-${target}-${i + 1}`, condo_name: r.condo, phone: r.phone, message_id: target, ...(r.price != null ? { price: r.price } : {}), ...(r.pet != null ? { pet_friendly: r.pet } : {}) }));
             const res = await fetch(CAP.push, {
               method: "POST", headers: { "Content-Type": "application/json", "X-API-Key": CAP.key },
               body: JSON.stringify({ group_uuid: m.group_uuid, requested_by: m.by_name ?? "ผู้ใช้", rooms: payload }),
