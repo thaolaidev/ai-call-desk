@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { notifyLine } from "./line";
 import { prettyPhone } from "./phone";
 import type { LeadStatus, Outcome } from "./status";
-import { deliverResult } from "./sync";
+import { deliverResult, notifyCalling } from "./sync";
 import { dispatchChat } from "./chat";
 
 export type Turn = { role: "ai" | "owner" | "system"; text: string };
@@ -95,7 +95,12 @@ export async function applyCallResult(db: SupabaseClient, r: CallResult) {
 
   // ห้องจากแชท: ส่งผลกลับทันที (ไม่รอรอบ 30 นาที) ให้การ์ดห้องอัปเดต แล้วโทรห้องถัดไปในคิวแชทต่อ
   if (call.via_chat) {
-    await deliverResult(db, r.callId).catch(() => null);
+    // ไม่รับสายแต่ยังจะโทรซ้ำ: ยังไม่ส่งผล "ติดต่อไม่ได้" (เว็บจะลบป้ายกำลังโทรออก ทีมอาจโทรซ้อน)
+    // → ตั้ง "กำลังโทร" โดย AI Call ค้างไว้ บอกทีมว่า AI ยังดูห้องนี้อยู่ · ส่งผลจริงตอนได้คำตอบหรือโทรครบรอบสุดท้าย
+    if (nextCallAt && (r.outcome === "noanswer" || r.outcome === "unclear")) {
+      await db.from("calls").update({ sync_status: "skipped", sync_error: "ไม่รับสาย · รอโทรซ้ำ (ส่งผลตอนได้คำตอบหรือครบรอบสุดท้าย)" }).eq("id", r.callId);
+      await notifyCalling(lead, call).catch(() => null);
+    } else await deliverResult(db, r.callId).catch(() => null);
     await dispatchChat(db).catch(() => null);
   }
 

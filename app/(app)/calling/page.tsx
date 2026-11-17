@@ -4,7 +4,7 @@ import { todayRangeBKK, fmtTime } from "@/lib/time";
 import { prettyPhone } from "@/lib/phone";
 import { Top } from "@/components/Top";
 import { AutoRefresh } from "@/components/AutoRefresh";
-import { setChatMode, removeChatQueued, callNow } from "./actions";
+import { setChatMode, removeChatQueued, callNow, addCallNow } from "./actions";
 
 export const dynamic = "force-dynamic";
 const STATE_LABEL: Record<string, string> = { dialing: "กำลังต่อสาย", ringing: "กำลังเรียก", in_progress: "กำลังคุย" };
@@ -117,6 +117,18 @@ export default async function CallingPage() {
                     {!room.concurrency && <p className="small muted">ห้องนี้ตั้งไว้ 0 สาย</p>}
                   </div>
                 </div>
+
+                <details className="card add-call">
+                  <summary className="card-h"><h3>+ เพิ่มห้องโทรเอง</h3><span className="hint">ไม่ต้องพิมพ์ในแชท</span></summary>
+                  <form action={addCallNow} className="card-b add-call-form">
+                    <input type="hidden" name="segment" value={seg} />
+                    <input name="phone" required placeholder="เบอร์ 08x-xxx-xxxx" inputMode="tel" aria-label="เบอร์โทร" />
+                    <input name="condo" required placeholder="ชื่อคอนโด" aria-label="ชื่อคอนโด" />
+                    <input name="rent" placeholder="ราคา" inputMode="numeric" aria-label="ราคา" />
+                    <button className="btn primary sm">เข้าคิวโทร</button>
+                  </form>
+                  <p className="small muted" style={{ padding: "0 16px 12px", margin: 0 }}>ผลดูได้ที่หน้าผลการโทร · ห้องที่เพิ่มเองไม่ขึ้นป้ายในแชท</p>
+                </details>
 
                 <div className="card">
                   <div className="card-h"><h3>คิวรอโทร</h3><span className="hint">{waitN} ห้อง</span></div>

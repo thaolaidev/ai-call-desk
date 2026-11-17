@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchChat } from "@/lib/chat";
+import { ingestLeads } from "@/lib/ingest";
+import { normalizePhone } from "@/lib/phone";
 
 const CHAT_MODES = { auto: "โทรทันที", queue: "รับเข้าคิว รอกดโทร", off: "ปิดรับ" } as const;
 
@@ -90,4 +92,27 @@ export async function callNow(formData: FormData) {
   const d = await dispatchChat(createAdminClient(), undefined, data!.segment).catch(() => ({ started: 0, waiting: undefined as string | undefined }));
   revalidatePath("/calling");
   redirect("/calling?saved=" + encodeURIComponent(d.started ? "เริ่มโทรซ้ำแล้ว" : `เลื่อนมาโทรรอบถัดไปแล้ว${d.waiting ? ` · ${d.waiting}` : ""}`));
+}
+
+/** เพิ่มห้องโทรเองจากหน้าห้องโทร (เบอร์ + ชื่อคอนโด + ราคา) → เข้าคิวของห้องนั้นเหมือนส่งมาจากแชท แล้วโทรทันทีถ้าห้องเปิดโทรทันที */
+export async function addCallNow(formData: FormData) {
+  const segment = formData.get("segment") === "old" ? "old" : "new";
+  const phone = normalizePhone(String(formData.get("phone") ?? ""));
+  const condo = String(formData.get("condo") ?? "").trim();
+  const rent = Number(String(formData.get("rent") ?? "").replace(/[^\d]/g, "")) || null;
+  if (phone.replace(/\D/g, "").length < 9 || !condo) redirect("/calling?err=" + encodeURIComponent("ใส่เบอร์และชื่อคอนโดให้ครบ"));
+  const supabase = await createClient();
+  const { data: auth } = await supabase.auth.getUser();
+  const db = createAdminClient();
+  const { data: same } = await db.from("leads").select("id, status").eq("phone", phone).ilike("condo", condo).maybeSingle();
+  if (same && ["queued", "calling"].includes(same.status)) redirect("/calling?err=" + encodeURIComponent(same.status === "calling" ? "AI กำลังโทรห้องนี้อยู่" : "ห้องนี้อยู่ในคิวแล้ว"));
+  const ing = await ingestLeads(db, [{ phone, condo, rent, source: "เพิ่มเอง", segment, queue: true }]);
+  if (ing.skipped.length) redirect("/calling?err=" + encodeURIComponent(ing.skipped[0].reason));
+  const { error } = await db.from("leads")
+    .update({ segment, chat_requested_at: new Date().toISOString(), chat_requested_by: auth?.user?.email?.split("@")[0] ?? "เพิ่มเอง", attempts: 0, next_call_at: null })
+    .eq("phone", phone).ilike("condo", condo).eq("status", "queued");
+  if (error) redirect("/calling?err=" + encodeURIComponent(error.message));
+  const d = await dispatchChat(db, undefined, segment).catch(() => ({ started: 0, waiting: undefined as string | undefined }));
+  revalidatePath("/calling");
+  redirect("/calling?saved=" + encodeURIComponent(d.started ? "เข้าคิวแล้ว เริ่มโทรเลย" : `เข้าคิวแล้ว${d.waiting ? ` · ${d.waiting}` : ""}`));
 }
