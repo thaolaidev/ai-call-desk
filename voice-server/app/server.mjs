@@ -449,6 +449,12 @@ async function runFlow(s) {
     f = await ask("foreign", Q("05"), () => P("05"), (a) => a.intent === "unclear" && !askedNat(a));
   }
   if (f.intent === "hangup" || s.gone) return;
+  // "ชาติไหนคะ" เฉยๆ (ยังไม่ได้บอกว่ารับ) แต่ AI ตีเป็น yes → ถือว่าถามกลับ ให้บอกสัญชาติแล้วฟังคำตอบก่อน
+  const saidAccept = (x) => /รับ(ได้|ค่ะ|ครับ|คะ|หมด|ทุก)|ได้(ค่ะ|ครับ|หมด)|โอเค|ok/i.test(String(x.text ?? "").replace(/\s+/g, "").replace(/ไม่รับ\S*/g, ""));
+  if (f.intent === "yes" && askedNat(f) && !saidAccept(f) && (snd("06A") || snd("06B"))) {
+    log(s.callId, "foreign: ถามชาติไหน ยังไม่ได้บอกว่ารับ → บอกสัญชาติก่อน");
+    f = { ...f, intent: "ask" };
+  }
   // เจ้าของถามว่าผู้เช่าชาติไหน → บอกสัญชาติ (มีชุด A และ B สุ่มเลือก 1 ชุด)
   let natTold = false;
   const tellNationality = async () => {
@@ -573,6 +579,117 @@ if (CFG.resultUrl && CFG.secret) {
       .then((j) => { if (j && (j.pruned || j.started)) log("heartbeat", `pruned ${j.pruned} · started ${j.started}`); })
       .catch(() => {});
   }, 30_000);
+}
+
+// ---------- อ่านคำบรรยายใต้รูปในกลุ่มแชท (แทน patch ฝั่ง dev ชั่วคราว) ----------
+// โพสต์รูป + "เบอร์ ชื่อคอนโด ราคา" ในกลุ่มที่ตั้งไว้ → ส่งเข้าห้องโทรเหมือนข้อความปกติ (id msg-<ข้อความ>-<ลำดับ> ให้หลังบ้านตั้งป้ายใต้โพสต์รูป)
+// เปิดเมื่อมี CAPTION_DB_URL (ผู้ใช้ฐานข้อมูลแบบอ่านอย่างเดียว) + CAPTION_GROUPS + CHAT_API_KEY · อ่านแค่ตัวอักษร ไม่อ่านรูป
+const CAP = {
+  db: env("CAPTION_DB_URL", ""),
+  groups: env("CAPTION_GROUPS", "").split(",").map((x) => x.trim()).filter(Boolean),
+  key: env("CHAT_API_KEY", ""),
+  push: env("DESK_PUSH_URL", CFG.resultUrl ? new URL("/api/chat/push", CFG.resultUrl).toString() : ""),
+  stateFile: `${CFG.recDir}/.caption-last-id`,
+};
+const TXT_PHONE = /(?:\+?66|0)[\s-]?[689]\d[\s-]?\d{3}[\s-]?\d{4}|0[2-7][\s-]?\d{3}[\s-]?\d{4}/g;
+const TXT_PRICE = /(?:ราคา|เช่า|price)?\s*(\d{1,3}(?:,\d{3})+|\d{4,6})\s*(?:บาท|฿|thb|\/เดือน|ต่อเดือน)?|(\d{1,3}(?:\.\d)?)\s*[kK]\b/i;
+const TXT_SKIP = /^\s*(?:✅|❌|ว่าง|ไม่ว่าง|move\s*in|รับ|ไม่รับ|ส่งโปรไฟล์|สถานะ|link|map|https?:)/i;
+const TXT_NOISE = /\b(?:tel|price|thb|condo|baht)\b|โทร|เบอร์|ราคา|ค่าเช่า|บาท|฿|ต่อเดือน|\/เดือน|คอนโด|ชื่อ|[:：•\-–|,/()]+/gi;
+const normPhone = (raw) => {
+  let d = String(raw).replace(/\D/g, "");
+  if (d.startsWith("66") && d.length === 11) d = "0" + d.slice(2);
+  return d.length >= 9 && d.length <= 10 && d[0] === "0" ? d : "";
+};
+/** เหมือน ParseAICallText ฝั่งหลังบ้าน: เบอร์บรรทัดเดียว = 1 ห้อง (ชื่อ = บรรทัดแรกที่ไม่ใช่เบอร์/ราคา) · หลายบรรทัดมีเบอร์ = แยกห้อง */
+export function parseRoomsText(text) {
+  const lines = String(text ?? "").replace(/\r/g, "").split("\n").map((line) => {
+    const phones = line.match(TXT_PHONE) ?? [];
+    let rest = line.replace(TXT_PHONE, " ");
+    let price = null;
+    const m = rest.match(TXT_PRICE);
+    if (m) {
+      if (m[1]) { const v = Number(m[1].replace(/,/g, "")); if (v >= 1000) price = v; }
+      else if (m[2]) { const v = Number(m[2]); if (v > 0) price = v * 1000; }
+      if (price != null) rest = rest.replace(m[0], " ");
+    }
+    const name = TXT_SKIP.test(line) ? "" : rest.replace(TXT_NOISE, " ").split(/\s+/).filter(Boolean).join(" ");
+    return { phones, name, price };
+  });
+  const phoneLines = lines.filter((l) => l.phones.length).length;
+  if (!phoneLines) return [];
+  const firstName = lines.find((l) => l.name)?.name ?? "";
+  const firstPrice = lines.find((l) => l.price != null)?.price ?? null;
+  const near = (i) => {
+    for (let j = i - 1; j >= 0; j--) if (!lines[j].phones.length && lines[j].name) return lines[j].name;
+    for (let j = i + 1; j < lines.length; j++) { if (lines[j].phones.length) break; if (lines[j].name) return lines[j].name; }
+    return "";
+  };
+  const out = []; const seen = new Set();
+  lines.forEach((l, i) => {
+    if (!l.phones.length) return;
+    let { name, price } = l;
+    if (phoneLines === 1) { name ||= firstName; price ??= firstPrice; } else if (!name) name = near(i);
+    if (!name) return;
+    for (const raw of l.phones) {
+      const phone = normPhone(raw);
+      if (!phone || seen.has(`${phone}|${name}`)) continue;
+      seen.add(`${phone}|${name}`);
+      out.push({ phone, condo: name, price });
+    }
+  });
+  return out;
+}
+
+if (CAP.db && CAP.groups.length && CAP.key && CAP.push) {
+  (async () => {
+    let pg;
+    try { pg = (await import("pg")).default; } catch { return log("caption: ไม่มีไลบรารี pg (build ใหม่ด้วย Dockerfile.app ล่าสุด)"); }
+    const pool = new pg.Pool({ connectionString: CAP.db, max: 1, idleTimeoutMillis: 30_000 });
+    pool.on("error", (e) => log("caption db", e.message));
+    let last = Number(await readFile(CAP.stateFile, "utf8").catch(() => "0")) || 0;
+    if (!last) {
+      const r = await pool.query("SELECT COALESCE(MAX(id), 0)::bigint AS id FROM chat_message").catch((e) => (log("caption db", e.message), null));
+      last = Number(r?.rows?.[0]?.id ?? 0); // เริ่มจากข้อความล่าสุด ไม่ย้อนไปโทรโพสต์เก่า
+      await writeFile(CAP.stateFile, String(last)).catch(() => {});
+    }
+    log("caption: เปิดอ่านคำบรรยายใต้รูป", CAP.groups.join(","), "จากข้อความ", last);
+    let busy = false;
+    setInterval(async () => {
+      if (busy) return; busy = true;
+      try {
+        const top = await pool.query("SELECT COALESCE(MAX(id), 0)::bigint AS id FROM chat_message");
+        const maxId = Number(top.rows?.[0]?.id ?? last);
+        let failed = false;
+        const { rows } = await pool.query(
+          `SELECT m.id, g.uuid::text AS group_uuid, m.body->>'text' AS text,
+                  COALESCE(NULLIF(BTRIM(u.first_name_th), ''), u.username) AS by_name
+             FROM chat_message m
+             JOIN chat_group g ON g.id = m.group_id
+             LEFT JOIN "user" u ON u.id = m.sender_user_id
+            WHERE m.id > $1 AND m.id <= $3 AND g.uuid::text = ANY($2) AND m.kind = 'attachment'
+              AND COALESCE(BTRIM(m.body->>'text'), '') <> '' AND m.body->'deleted' IS NULL
+            ORDER BY m.id LIMIT 50`, [last, CAP.groups, maxId]);
+        for (const m of rows) {
+          const rooms = parseRoomsText(m.text);
+          if (rooms.length) {
+            const payload = rooms.map((r, i) => ({ id: `msg-${m.id}-${i + 1}`, condo_name: r.condo, phone: r.phone, message_id: Number(m.id), ...(r.price != null ? { price: r.price } : {}) }));
+            const res = await fetch(CAP.push, {
+              method: "POST", headers: { "Content-Type": "application/json", "X-API-Key": CAP.key },
+              body: JSON.stringify({ group_uuid: m.group_uuid, requested_by: m.by_name ?? "ผู้ใช้", rooms: payload }),
+              signal: AbortSignal.timeout(45_000),
+            }).catch((e) => ({ ok: false, status: 0, text: async () => e.message }));
+            const j = res.ok ? await res.json().catch(() => ({})) : null;
+            log("caption push", m.id, rooms.map((r) => `${r.phone} ${r.condo}`).join(" | "), res.ok ? `queued ${j?.queued ?? 0} started ${j?.started ?? 0}` : `ERR ${res.status} ${(await res.text().catch(() => "")).slice(0, 120)}`);
+            if (!res.ok && res.status !== 400) { failed = true; break; } // เว็บล่ม → ลองใหม่รอบหน้า (ไม่ขยับ last)
+          }
+          last = Number(m.id);
+        }
+        if (!failed && rows.length < 50) last = Math.max(last, maxId);
+        await writeFile(CAP.stateFile, String(last)).catch(() => {});
+      } catch (e) { log("caption", e.message); }
+      finally { busy = false; }
+    }, 10_000);
+  })();
 }
 
 // ---------- รับคำสั่งโทรจากเว็บ ----------

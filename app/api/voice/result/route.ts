@@ -67,6 +67,11 @@ export async function POST(req: NextRequest) {
   const textSaysNo = NEG_AVAIL.test(availText.replace(/\s+/g, "")) || NEG_SUMMARY.test(String(full?.summary ?? "").replace(/\s+/g, ""));
   const textConflict = groupOf(outcome) === "avail" && textSaysNo;
   if (textConflict) outcome = "not_avail";
+  // ยังไม่ได้คำตอบเรื่องห้องว่างจริง (เจ้าของวางสาย / ถามกลับ / ไม่ตอบ) แต่ AI ฟังทั้งสายสรุปว่า "ว่าง"
+  // → ไม่เชื่อ (อาจเดาจากคำพูดของบอทเอง) ให้เป็น "ไม่ได้คำตอบ" แล้วโทรซ้ำตามรอบ
+  const availAnswered = answers.some((a) => a.step === "avail" && (a.intent === "yes" || a.intent === "no"));
+  const unconfirmedAvail = groupOf(outcome) === "avail" && liveOutcome === "unclear" && !availAnswered;
+  if (unconfirmedAvail) outcome = "unclear";
   const pick = (k: string) => live[k] ?? (full?.details as any)?.[k] ?? null;
   // ถ้าระหว่างสายกับหลังจบได้ผลไม่ตรงกัน (เช่น "ยังว่าง" กับ "ไม่ว่าง") → ใช้ผลหลังจบ และติดธงให้แอดมินฟังซ้ำ
   const conflict = disagree || textConflict;
@@ -76,7 +81,7 @@ export async function POST(req: NextRequest) {
     callId: call.id,
     outcome,
     durationSec: Number(r.duration_sec) || null,
-    summary: `${conflict ? "⚠️ ควรฟังซ้ำ · " : ""}${full?.summary || (liveSummary ? `เจ้าของตอบ — ${liveSummary}` : "")}` || null,
+    summary: `${unconfirmedAvail ? "⚠️ เจ้าของยังไม่ได้ตอบว่าห้องว่าง · " : conflict ? "⚠️ ควรฟังซ้ำ · " : ""}${full?.summary || (liveSummary ? `เจ้าของตอบ — ${liveSummary}` : "")}` || null,
     endedReason: "answered (sip)",
     analysis: {
       call_outcome: outcome,
@@ -94,7 +99,9 @@ export async function POST(req: NextRequest) {
       current_lease_until: full?.current_lease_until ?? null,
       summary_th: full?.summary ?? null,
       live_outcome: liveOutcome,
-      needs_review: textConflict
+      needs_review: unconfirmedAvail
+        ? `AI ฟังทั้งสายสรุปว่า "${fullOutcome}" แต่ระหว่างสายเจ้าของยังไม่ได้ตอบว่าห้องว่าง — ระบบไม่นับเป็นว่าง จะโทรซ้ำ`
+        : textConflict
         ? `ผลจัดเป็น "ว่าง" แต่คำตอบ/สรุปบอกว่าไม่ว่าง${availText ? ` ("${availText}")` : ""} — ระบบเปลี่ยนเป็นไม่ว่าง ควรฟังเสียงซ้ำ`
         : conflict ? `ระหว่างสายได้ยินว่า "${liveOutcome}" แต่ฟังทั้งสายได้ "${fullOutcome}" — ควรฟังเสียงซ้ำ` : null,
       answer_text: answers.map((a) => a.text).filter(Boolean).join(" / "),
