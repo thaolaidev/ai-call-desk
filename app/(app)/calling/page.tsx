@@ -4,7 +4,7 @@ import { todayRangeBKK, fmtTime } from "@/lib/time";
 import { prettyPhone } from "@/lib/phone";
 import { Top } from "@/components/Top";
 import { AutoRefresh } from "@/components/AutoRefresh";
-import { setChatMode, removeChatQueued } from "./actions";
+import { setChatMode, removeChatQueued, callNow } from "./actions";
 
 export const dynamic = "force-dynamic";
 const STATE_LABEL: Record<string, string> = { dialing: "กำลังต่อสาย", ringing: "กำลังเรียก", in_progress: "กำลังคุย" };
@@ -20,6 +20,13 @@ const MODE_UI = [
   ["off", "ปิดรับ", "ค้นในแชทได้ตามปกติ แต่ไม่ส่งมาให้ AI"],
 ] as const;
 const MODE_CHIP: Record<string, string> = { auto: "โทรทันที", queue: "รอกดโทร", off: "ปิดรับ" };
+const RETRY_WHY: Record<string, string> = { noanswer: "ไม่รับสาย", unclear: "ฟังไม่ชัด", callback: "ขอให้โทรกลับ" };
+/** สถานะในคิว: รอโทร / ไม่รับสาย · โทรซ้ำ 10:38 (ครั้งที่ 2/3) */
+function waitLabel(l: any, max: number) {
+  if (l.status === "queued") return "รอโทร";
+  const when = l.next_call_at ? (Date.parse(l.next_call_at) <= Date.now() ? "โทรซ้ำรอบนี้" : `โทรซ้ำ ${fmtTime(l.next_call_at)}`) : "โทรซ้ำ";
+  return `${RETRY_WHY[l.status] ?? l.status} · ${when} (ครั้งที่ ${(l.attempts ?? 0) + 1}/${max})`;
+}
 
 export default async function CallingPage() {
   const sb = await createClient();
@@ -32,11 +39,12 @@ export default async function CallingPage() {
     sb.from("calls").select("id, state, started_at, attempt, segment, leads!calls_lead_id_fkey(condo, unit, owner_name, phone, segment)").in("state", IN_FLIGHT).order("started_at"),
     ...SEGS.flatMap((seg) => [
       sb.from("calls").select("id", { count: "exact", head: true }).eq("segment", seg).gte("started_at", from).lt("started_at", to),
-      sb.from("leads").select("id, condo, code, phone, status, next_call_at, chat_requested_by, chat_requested_at", { count: "exact" })
+      // รอโทร + รอโทรซ้ำ (ไม่รับสาย / ฟังไม่ชัด / ขอให้โทรกลับ) ทั้งที่ถึงเวลาแล้วและยังไม่ถึง
+      sb.from("leads").select("id, condo, code, phone, status, attempts, next_call_at, chat_requested_by, chat_requested_at", { count: "exact" })
         .eq("segment", seg)
         .not("chat_requested_at", "is", null)
-        .or(`status.eq.queued,and(status.in.(noanswer,unclear,callback),next_call_at.lt."${now}")`)
-        .order("chat_requested_at").limit(10),
+        .in("status", ["queued", "noanswer", "unclear", "callback"])
+        .order("next_call_at", { ascending: true, nullsFirst: true }).order("chat_requested_at").limit(10),
     ]),
   ]);
   if (error || !s) return <div className="view"><p className="banner err">{error?.message ?? "ไม่พบ settings"}</p></div>;
@@ -117,13 +125,21 @@ export default async function CallingPage() {
                       <div className="q-main">
                         <b>{l.code ? <span className="mono">{l.code} </span> : null}{l.condo}</b>
                         <span className="small muted">
-                          <span className="mono">{prettyPhone(l.phone)}</span> · {l.chat_requested_by ?? "-"} {fmtTime(l.chat_requested_at)} · {l.status === "queued" ? "รอโทร" : `รอโทรซ้ำ${l.next_call_at ? ` ${fmtTime(l.next_call_at)}` : ""}`}
+                          <span className="mono">{prettyPhone(l.phone)}</span> · {l.chat_requested_by ?? "-"} {fmtTime(l.chat_requested_at)} · {waitLabel(l, s.max_attempts ?? 3)}
                         </span>
                       </div>
-                      <form action={removeChatQueued}>
-                        <input type="hidden" name="id" value={l.id} />
-                        <button className="btn sm" title="เอาห้องนี้ออกจากคิว AI จะไม่โทร">ลบ</button>
-                      </form>
+                      <div className="q-acts">
+                        {l.status !== "queued" && l.next_call_at && l.next_call_at > now && (
+                          <form action={callNow}>
+                            <input type="hidden" name="id" value={l.id} />
+                            <button className="btn sm" title="โทรซ้ำรอบถัดไปเลย ไม่ต้องรอเวลา">โทรเลย</button>
+                          </form>
+                        )}
+                        <form action={removeChatQueued}>
+                          <input type="hidden" name="id" value={l.id} />
+                          <button className="btn sm" title="เอาห้องนี้ออกจากคิว AI จะไม่โทร">ลบ</button>
+                        </form>
+                      </div>
                     </div>
                   )) : <p className="empty">ไม่มีห้องในคิว</p>}
                   {waitN > 0 && (

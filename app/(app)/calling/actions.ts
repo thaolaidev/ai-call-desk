@@ -78,3 +78,16 @@ export async function removeChatQueued(formData: FormData) {
   revalidatePath("/calling");
   redirect("/calling?saved=" + encodeURIComponent(`ลบออกจากคิวแล้ว ${data?.length ?? 0} ห้อง`));
 }
+
+/** โทรซ้ำห้องนี้รอบถัดไปเลย (ไม่ต้องรอเวลาโทรซ้ำ) แล้วเติมสายทันทีถ้าห้องเปิดโทรทันที */
+export async function callNow(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("leads")
+    .update({ next_call_at: new Date().toISOString() })
+    .eq("id", id).in("status", ["noanswer", "unclear", "callback"]).select("segment").maybeSingle();
+  if (error || !data) redirect("/calling?err=" + encodeURIComponent(error?.message ?? "ห้องนี้ไม่ได้รอโทรซ้ำแล้ว"));
+  const d = await dispatchChat(createAdminClient(), undefined, data!.segment).catch(() => ({ started: 0, waiting: undefined as string | undefined }));
+  revalidatePath("/calling");
+  redirect("/calling?saved=" + encodeURIComponent(d.started ? "เริ่มโทรซ้ำแล้ว" : `เลื่อนมาโทรรอบถัดไปแล้ว${d.waiting ? ` · ${d.waiting}` : ""}`));
+}

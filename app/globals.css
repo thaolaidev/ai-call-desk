@@ -265,6 +265,7 @@ pre.code{margin:0;padding:16px;background:#0f1626;color:#dfe6f3;border-radius:10
 .q-main b{font-weight:500;overflow-wrap:anywhere}
 .q-main .small{overflow-wrap:anywhere}
 .q-row form{flex:none}
+.q-acts{display:flex;gap:6px;flex:none}
 .room .room-row{flex-wrap:wrap;gap:8px}
 
 /* ผลการโทร: ตัวกรองวันที่ + กราฟรายวัน */
