@@ -15,6 +15,9 @@ const MAX_ROOMS = 30;
  * body: { group_uuid, requested_by?, rooms: [{ id, asset_uuid, phone, condo_name, condo_id?, price?, code?, owner_name?, listed_at?, status?, updated_at? }] }
  * ผลการโทรส่งกลับทาง POST {VPS_API_URL}/results ทันทีที่สายจบ (มี chat_group_uuid + asset_uuid ให้ไปอัปเดตการ์ดห้อง)
  */
+/** ชื่อที่จริงๆ เป็นหัวข้อในฟอร์มทรัพย์ใหม่ ไม่ใช่ชื่อคอนโด */
+const FORM_LINE = /^\s*(?:\d+\s*[.)]\s*)?(?:number\s*owner|owner\s*(?:id\s*)?line|name\s*property|room\s*type|type|size|floor|price|pet|code)\b/i;
+
 export async function POST(req: NextRequest) {
   if (!process.env.CHAT_API_KEY || req.headers.get("x-api-key") !== process.env.CHAT_API_KEY) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -76,6 +79,12 @@ export async function POST(req: NextRequest) {
     const id = r?.id != null ? String(r.id) : null;
     const asset = r?.asset_uuid ? String(r.asset_uuid) : null;
     const l: any = id ? byId.get(id) : null;
+    // โพสต์ฟอร์มทรัพย์ใหม่ (Name property / Number owner / Type …) = ทีมลงประกาศเอง ไม่ใช่ห้องให้ AI โทร
+    // หลังบ้านอ่านชื่อจากบรรทัด "Number owner 1: 08x…" ได้เป็น "Number Owner 1" → ข้าม
+    if (String(id ?? "").startsWith("msg-") && FORM_LINE.test(String(r?.typed_condo ?? r?.condo_name ?? r?.condo ?? ""))) {
+      result.push({ asset_uuid: asset, id, state: "skipped", reason: "โพสต์ฟอร์มทรัพย์ใหม่ ไม่ต้องโทร" });
+      continue;
+    }
     if (!r?.phone || normalizePhone(String(r.phone)).replace(/\D/g, "").length < 9) { result.push({ asset_uuid: asset, id, state: "skipped", reason: "ไม่มีเบอร์โทรหรือเบอร์ไม่ถูกต้อง" }); continue; }
     if (l && ["calling", "queued"].includes(l.status)) { result.push({ asset_uuid: asset, id, state: "skipped", reason: l.status === "calling" ? "AI กำลังโทรห้องนี้อยู่" : "อยู่ในคิวโทรแล้ว" }); continue; }
     if (l?.status === "dnc") { result.push({ asset_uuid: asset, id, state: "skipped", reason: "เจ้าของขอไม่ให้ติดต่อ" }); continue; }

@@ -23,18 +23,27 @@ export async function POST(req: NextRequest) {
   if (!r?.call_id) return NextResponse.json({ error: "ไม่มี call_id" }, { status: 400 });
 
   const db = createAdminClient();
-  const { data: call } = await db.from("calls").select("id, state").eq("id", r.call_id).maybeSingle();
+  const { data: call } = await db.from("calls").select("id, state, segment").eq("id", r.call_id).maybeSingle();
   if (!call) return NextResponse.json({ ok: true, note: "ไม่พบสายนี้" });
   if (call.state === "ended") return NextResponse.json({ ok: true, note: "ประมวลผลไปแล้ว" });
 
   if (r.status !== "answered") {
-    // error = server เสียงโทรออกไม่สำเร็จ (เช่น โหลดไฟล์เสียงไม่ได้) → นับเป็นไม่รับสาย ระบบจะลองใหม่ตามรอบโทรซ้ำ
+    // สายไม่ได้คุย แยก 3 แบบ (ตามที่ server เสียงอ่านจาก cause):
+    //  declined    = ตัดสาย/สายไม่ว่าง → ห้อง Check สถานะห้อง: ไม่ว่าง · ห้อง Check ทรัพย์ใหม่: ยังไม่แน่นอน + โทรซ้ำ
+    //  noanswer    = ดังแต่ไม่รับ → ยังไม่แน่นอน + โทรซ้ำ
+    //  unreachable = โทรไม่ติดเลย (ปิดเครื่อง/เบอร์ไม่มี/ไม่มีสัญญาณ) → ยังไม่แน่นอน + โทรซ้ำ
+    //  error       = server เสียงโทรออกไม่สำเร็จ → นับเป็นไม่รับสาย ลองใหม่ตามรอบ
+    const kind = r.status === "invalid" ? "unreachable" : String(r.status ?? "noanswer");
+    const declinedOld = kind === "declined" && call.segment === "old";
+    const TEXT: Record<string, string> = { declined: "เจ้าของตัดสาย", unreachable: "โทรไม่ติด (ปิดเครื่อง/เบอร์ไม่มี/ไม่มีสัญญาณ)", error: "server เสียงโทรออกไม่สำเร็จ", noanswer: "ไม่รับสาย" };
     await applyCallResult(db, {
       callId: call.id,
-      outcome: r.status === "invalid" ? "invalid" : "noanswer",
-      summary: r.status === "error" ? `โทรออกไม่สำเร็จ: ${String(r.error ?? "").slice(0, 200)}` : undefined,
-      endedReason: `sip:${r.status} ${r.status === "error" ? String(r.error ?? "").slice(0, 120) : `cause ${r.cause ?? "-"}`}`,
-      transcript: [{ role: "system", text: r.status === "invalid" ? "เบอร์ไม่ถูกต้อง/ติดต่อไม่ได้" : r.status === "error" ? "server เสียงโทรออกไม่สำเร็จ" : "ไม่รับสาย" }],
+      outcome: declinedOld ? "not_avail" : "noanswer",
+      summary: r.status === "error" ? `โทรออกไม่สำเร็จ: ${String(r.error ?? "").slice(0, 200)}`
+        : declinedOld ? "เจ้าของตัดสาย → ปรับห้องเป็นไม่ว่าง" : TEXT[kind] ?? "ไม่รับสาย",
+      endedReason: `sip:${kind} ${r.status === "error" ? String(r.error ?? "").slice(0, 120) : `cause ${r.cause ?? "-"}`}`,
+      transcript: [{ role: "system", text: TEXT[kind] ?? "ไม่รับสาย" }],
+      analysis: { call_kind: kind },
     });
     return NextResponse.json({ ok: true });
   }
@@ -95,6 +104,7 @@ export async function POST(req: NextRequest) {
       rules_explained: live.accepted_after_rules || pick("accepts_foreigners") === false ? true : null,
       accepted_after_rules: live.accepted_after_rules ?? null,
       nationality_told: live.nationality_told ?? null,
+      pet_friendly: typeof live.pet_friendly === "boolean" ? live.pet_friendly : null,
       foreign_exclude: Array.isArray(live.foreign_exclude) ? live.foreign_exclude.join(", ") : (full?.details as any)?.excluded_nationalities ?? null,
       current_lease_until: full?.current_lease_until ?? null,
       summary_th: full?.summary ?? null,

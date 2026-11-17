@@ -17,7 +17,8 @@ const BACKOFF_MIN = [1, 5, 15, 60, 180];
 /** ผลการโทร → สถานะห้องบน VPS (null = ยืนยันไม่ได้ ให้ VPS คงสถานะเดิม) */
 export const VPS_STATUS: Record<string, "ว่าง" | "ไม่ว่าง" | null> = {
   avail: "ว่าง", avail_ok: "ว่าง", avail_profile: "ว่าง", avail_no: "ว่าง", not_avail: "ไม่ว่าง",
-  callback: null, noanswer: null, unclear: null, invalid: null, wrong_number: null, dnc: null,
+  // เจ้าของไม่รับเอเจนต์ / ไม่ให้โทรอีก = ไม่ว่าง (ตามที่ทีมกำหนด)
+  callback: null, noanswer: null, unclear: null, invalid: null, wrong_number: null, dnc: "ไม่ว่าง",
 };
 
 const FAIL_NOTE: Record<string, string> = {
@@ -35,8 +36,12 @@ const FAIL_NOTE: Record<string, string> = {
  * - ติดต่อไม่ได้: status = "ติดต่อไม่ได้", status_updated_at = null → VPS คงสถานะเดิม บันทึกแค่ประวัติโทร + note
  */
 /** หมายเหตุตอนติดต่อไม่ได้ เช่น "ไม่รับสาย (ครั้งที่ 1/3) · AI จะโทรซ้ำ 10:38" — ขึ้นบนการ์ด/ปุ่มในแชท */
+/** ลักษณะสายที่ไม่ได้คุย จาก ended_reason "sip:declined cause 17" → declined / noanswer / unreachable / error */
+export const callKind = (call: any) => String(call?.analysis?.call_kind ?? /^sip:(\w+)/.exec(String(call?.ended_reason ?? ""))?.[1] ?? "");
+const KIND_TEXT: Record<string, string> = { declined: "เจ้าของตัดสาย", unreachable: "โทรไม่ติด (ปิดเครื่อง/ไม่มีสัญญาณ)", error: "ระบบโทรออกไม่สำเร็จ" };
+
 function failNote(call: any, lead: any, willRetry: boolean, max?: number | null) {
-  const what = call.outcome === "noanswer" ? "ไม่รับสาย" : FAIL_NOTE[call.outcome] ?? "โทรแล้วติดต่อไม่ได้";
+  const what = call.outcome === "noanswer" ? KIND_TEXT[callKind(call)] ?? "ไม่รับสาย" : FAIL_NOTE[call.outcome] ?? "โทรแล้วติดต่อไม่ได้";
   const nth = `ครั้งที่ ${call.attempt ?? 1}${max ? `/${max}` : ""}`;
   const at = lead?.next_call_at ? new Date(lead.next_call_at) : null;
   const when = at && !isNaN(+at)
@@ -59,13 +64,31 @@ export function buildResultPayload(call: any, lead: any, sentAt = new Date().toI
   const availDate = status
     ? thaiDateToISO(availText) ?? (status === "ว่าง" && a.ready_now === true ? thaiDateToISO("วันนี้") : null)
     : null;
-  const extra = [
-    status === "ว่าง" && availText && !availDate ? `ว่าง: ${availText}` : "",
-    a.owner_price ? `เจ้าของแจ้งราคา ${Number(a.owner_price).toLocaleString("en-US")} บาท` : "",
-    a.foreign_exclude ? `รับต่างชาติ ยกเว้น ${a.foreign_exclude}` : "",
+  // หมายเหตุสั้นๆ (ขึ้นบนการ์ดห้อง และใต้ข้อความในแชท) เช่น
+  // "ว่าง · รับต่างชาติ · พร้อมเข้าอยู่ · ยืนยันราคา 13,000 · เลี้ยงสัตว์ได้"
+  const fmt = (n: unknown) => Number(n).toLocaleString("en-US");
+  const foreign = a.foreign_exclude ? `รับต่างชาติ ยกเว้น ${a.foreign_exclude}`
+    : a.accepts_foreigners === true || call.outcome === "avail_ok" || call.outcome === "avail_profile" ? "รับต่างชาติ"
+    : a.accepts_foreigners === false || call.outcome === "avail_no" ? "ไม่รับต่างชาติ" : "";
+  const short = [
+    call.outcome === "dnc" ? "ไม่ว่าง · เจ้าของไม่รับเอเจนต์ / ขอไม่ให้โทรอีก" : status ?? "",
+    status === "ว่าง" ? foreign : "",
+    status === "ว่าง" && a.ready_now === true ? "พร้อมเข้าอยู่" : "",
+    availText ? `${status === "ไม่ว่าง" ? "จะว่าง" : "เข้าได้"} ${availText}` : "",
+    a.owner_price ? `เจ้าของแจ้งราคา ${fmt(a.owner_price)}` : a.price_confirmed === true && lead?.rent ? `ยืนยันราคา ${fmt(lead.rent)}` : "",
+    a.pet_friendly === true ? "เลี้ยงสัตว์ได้" : a.pet_friendly === false ? "เลี้ยงสัตว์ไม่ได้" : "",
+    call.outcome === "avail" && willRetry ? "ยังไม่ได้ถามเรื่องต่างชาติ · AI จะโทรถามอีกครั้ง" : "",
+    a.needs_review ? "⚠️ ควรฟังเสียงซ้ำ" : "",
+  ].filter(Boolean).join(" · ");
+  // หมายเหตุ = สรุป 1 ประโยคของ AI (แบบ "ห้องยังว่างและพร้อมเข้าอยู่ สายตัดไปก่อนยืนยันราคา") + สิ่งที่ทีมต้องรู้เพิ่ม
+  // ไม่มีสรุปจาก AI (ฟังทั้งสายไม่สำเร็จ) = ใช้สรุปแบบรายการแทน
+  const addOn = [
+    call.outcome === "avail" && willRetry ? "AI จะโทรถามเรื่องต่างชาติอีกครั้ง" : "",
+    a.foreign_exclude && !String(call.summary ?? "").includes(String(a.foreign_exclude).split(",")[0]) ? `ไม่รับ ${a.foreign_exclude}` : "",
+    a.pet_friendly === true && !/สัตว์/.test(String(call.summary ?? "")) ? "เลี้ยงสัตว์ได้" : "",
   ].filter(Boolean).join(" · ");
   const note = status
-    ? [call.summary, extra].filter(Boolean).join(" · ") || null
+    ? (call.summary ? [call.summary, addOn].filter(Boolean).join(" · ") : short || null)
     : failNote(call, lead, willRetry, maxAttempts);
   return {
     event: "call.completed",
@@ -87,7 +110,13 @@ export function buildResultPayload(call: any, lead: any, sentAt = new Date().toI
     // API เว็บเท่าไหร่รับ ว่าง / ไม่ว่าง / ยังไม่แน่นอน / ติดต่อไม่ได้ (ห้ามว่าง)
     // ไม่รับสาย / ฟังไม่ชัด / ขอให้โทรกลับ = "ยังไม่แน่นอน" (ห้องยังไม่แน่นอน + ประวัติโทรแล้ว · AI โทรซ้ำตามรอบ)
     // เบอร์ผิด / เบอร์ปิด / ไม่ให้ติดต่อ = "ติดต่อไม่ได้" (คงสถานะห้องเดิม)
-    status: status ?? (UNSURE_OUTCOMES.includes(call.outcome) ? "ยังไม่แน่นอน" : "ติดต่อไม่ได้"),
+    // ฟังไม่ชัด = รับสายแต่ได้คำตอบไม่ชัด (ปุ่ม "ฟังไม่ชัด")
+    status: status ?? (call.outcome === "unclear" ? "ฟังไม่ชัด" : UNSURE_OUTCOMES.includes(call.outcome) ? "ยังไม่แน่นอน" : "ติดต่อไม่ได้"),
+    // ยังไม่ได้คำตอบและ AI จะโทรอีก → ผลโทร "รอโทรซ้ำ" แทน "โทรแล้ว"
+    // ห้องว่างที่ยังไม่รู้เรื่องต่างชาติ ก็ "รอโทรซ้ำ" ด้วย (AI จะโทรถามอีกครั้ง)
+    retry: willRetry && (!status || call.outcome === "avail"),
+    call_kind: callKind(call) || null,
+    pet_friendly: typeof a.pet_friendly === "boolean" ? a.pet_friendly : null,
     status_updated_at: status ? sentAt : null,
     previous_status: lead.vps_status ?? null,
     note,
@@ -95,7 +124,8 @@ export function buildResultPayload(call: any, lead: any, sentAt = new Date().toI
     outcome: call.outcome,
     attempt: call.attempt,
     duration_sec: call.duration_sec,
-    accepts_foreigners: a.accepts_foreigners ?? null,
+    // ว่างรับตช / ว่างไม่รับตช
+    accepts_foreigners: a.accepts_foreigners ?? (call.outcome === "avail_ok" || call.outcome === "avail_profile" ? true : call.outcome === "avail_no" ? false : null),
     owner_agreed_profile: a.owner_agreed_profile ?? null,
     profile_channel: a.profile_channel ?? null,
     line_id: a.line_id ?? lead.line_id ?? null,
@@ -163,7 +193,7 @@ export async function checkHandled(items: { id: string; since_seconds: number }[
 }
 
 /** ผลที่ยังไม่ได้คำตอบเรื่องห้อง และจะโทรซ้ำ → ส่งสถานะ "ยังไม่แน่นอน" */
-export const UNSURE_OUTCOMES = ["noanswer", "unclear", "callback"];
+export const UNSURE_OUTCOMES = ["noanswer", "unclear", "callback", "wrong_number"];
 
 export function sign(secret: string, timestamp: string, body: string) {
   return "sha256=" + createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
@@ -203,7 +233,7 @@ export async function deliverResult(db: SupabaseClient, callId: string) {
     // หลังบ้านยังไม่รองรับ "ยังไม่แน่นอน" (ยังไม่ได้ลง patch) →
     // 1) ตั้งผ่านบัญชี AI Call เหมือนคนในทีมกดปุ่มเอง (ยังไม่แน่นอน + โทรแล้ว / โทรแล้ว + รอตอบ)
     // 2) ยังไม่ได้ตั้งบัญชี หรือทำไม่สำเร็จ → ส่ง "ติดต่อไม่ได้" (ลบป้ายกำลังโทรออก ไม่ค้าง)
-    if (res.status === 400 && payload.status === "ยังไม่แน่นอน") {
+    if (res.status === 400 && (payload.status === "ยังไม่แน่นอน" || payload.status === "ฟังไม่ชัด")) {
       const txt = await res.text().catch(() => "");
       if (/unsupported status/i.test(txt)) {
         const viaBot = await botMarkUnsure(lead, call, `AI Call: ${payload.note ?? "ไม่รับสาย"}`).catch((e) => { console.error("botMarkUnsure", e?.message); return false; });

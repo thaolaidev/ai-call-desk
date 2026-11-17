@@ -19,6 +19,7 @@ export const DEFAULT_PLAY: Record<string, { enabled: boolean; wait: number }> = 
   "03-2": { enabled: true, wait: 1 },
   "04-1": { enabled: true, wait: 0 },  // เล่นเฉพาะลีดที่มีเสียงราคา
   "04-2": { enabled: true, wait: 1 },
+  "10": { enabled: true, wait: 1 },  // ถามเลี้ยงสัตว์ — ข้ามเองถ้ายังไม่มีไฟล์เสียง
   "05": { enabled: true, wait: 1 },
   "06A": { enabled: true, wait: 0 },
   "06B": { enabled: true, wait: 0 },
@@ -50,7 +51,7 @@ export async function loadPlaylist(db: SupabaseClient) {
 export function buildPlaybackList(steps: { key: string; enabled: boolean; wait: number }[], condoFile: string | null) {
   const list: string[] = [];
   for (const s of steps) {
-    if (!s.enabled || ["ack", "02B", "04-1", "04-2", "06B", "07-5", "09A"].includes(s.key)) continue; // ใช้เฉพาะระบบโทรแบบแยกทาง
+    if (!s.enabled || ["ack", "02B", "04-1", "04-2", "06B", "07-5", "09A", "10"].includes(s.key)) continue; // ใช้เฉพาะระบบโทรแบบแยกทาง
     list.push(yalecomName(s.key));
     if (s.key === "02-1" && condoFile) list.push(condoFile);
     for (let i = 0; i < Math.min(15, Math.max(0, s.wait)); i++) list.push(WAIT_FILE);

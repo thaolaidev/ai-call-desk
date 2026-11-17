@@ -269,6 +269,7 @@ const KINDS = {
   price: 'ราคาห้องตามที่บอทพูดถูกไหม → intent: "yes" | "no" | "unclear" · ถ้าเจ้าของบอกราคาใหม่ ใส่ owner_price (ตัวเลขบาท)',
   foreign: 'เจ้าของรับลูกค้าต่างชาติไหม → intent: "yes" (รับ · รวมถึงไม่รับแค่บางสัญชาติ เช่น "ไม่รับจีนกับอินเดีย" = รับชาติอื่น ให้ใส่ excluded_nationalities) | "no" (ไม่รับต่างชาติเลย/รับแต่คนไทย) | "ask" (ยังไม่ตอบว่ารับไหม แต่ถามกลับว่าลูกค้าชาติไหน เช่น "ชาติไหน" "คนที่ไหน") | "unclear" · asks_nationality = true ถ้าเจ้าของถามว่าผู้เช่า/ลูกค้าชาติไหน (ทั้งกรณี ask และ yes)',
   rules: 'บอทเพิ่งอธิบายกฎตรวจห้องของบริษัท เจ้าของเปลี่ยนใจรับลูกค้าต่างชาติไหม → intent: "yes" (โอเค/รับได้/ถ้าแบบนี้รับ) | "no" (ยังไม่รับ/รับแต่คนไทย) | "unclear" (แค่รับฟัง เช่น ค่ะ ครับ อืม)',
+  pet: 'ห้องนี้เลี้ยงสัตว์ได้ไหม → intent: "yes" (ได้/เลี้ยงได้/สัตว์เล็กได้) | "no" (ไม่ได้/ห้ามเลี้ยง/นิติไม่ให้) | "unclear"',
   profile: 'ให้แอดมินส่งโปรไฟล์ลูกค้าให้พิจารณาก่อนดีไหม → intent: "yes" (ได้/ส่งมาได้/ลองดู) | "no" (ไม่ต้อง/ไม่รับ/ไม่สนใจ) | "unclear"',
 };
 
@@ -277,6 +278,7 @@ const NEG = {
   avail: /ไม่ว่าง|ไม่ได้ว่าง|ไม่ค่อยว่าง|มีคน(เช่า|อยู่|จอง)|เช่า(ไป)?แล้ว|ขาย(ไป)?แล้ว|ปล่อย(ไป)?แล้ว|ไม่มีห้อง|ไม่เหลือ|ติดผู้เช่า|ไม่ปล่อย/,
   foreign: /ไม่รับ|ไม่เอา(ต่างชาติ|ฝรั่ง)?|เฉพาะคนไทย|คนไทยเท่านั้น|รับแต่คนไทย/,
   profile: /ไม่ต้อง|ไม่สะดวก|ไม่สนใจ|ไม่เอา/,
+  pet: /ไม่ได้|ห้าม|ไม่ให้เลี้ยง|ไม่อนุญาต|เลี้ยงไม่ได้/,
 };
 function checkText(kind, text, intent) {
   // ต่างชาติ: "ไม่รับจีนกับอินเดีย" = รับชาติอื่น → yes (ไม่ใช่ no)
@@ -372,7 +374,7 @@ async function runFlow(s) {
     if (!s.gone && (a.intent === "silent" || again)) { s.qStart = Date.now(); await say(); a = await L(kind, null, `${q} (ถามซ้ำ)`); }
     return a;
   };
-  const live = (s.live = { outcome: "unclear", ready_now: null, available_from: null, price_confirmed: null, owner_price: null, accepts_foreigners: null, owner_agreed_profile: null, nationality_told: null, accepted_after_rules: null });
+  const live = (s.live = { outcome: "unclear", ready_now: null, available_from: null, price_confirmed: null, owner_price: null, accepts_foreigners: null, owner_agreed_profile: null, nationality_told: null, accepted_after_rules: null, pet_friendly: null });
 
   // ทักทาย 3 ท่อน เว้นท่อนละ 1 วินาที (ให้เจ้าของตั้งตัว) · ยังไม่มีไฟล์ท่อนใหม่ = ใช้ไฟล์ 01 เดิม
   const gap = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -438,6 +440,14 @@ async function runFlow(s) {
   // ยืนยันราคา (ข้ามถ้ายืนยันไปแล้วตอนเจ้าของถามราคากลับ)
   if (s.snd.price && s.on("04-1") && !priceDone) await confirmPrice();
   if (s.gone) return;
+
+  // สัตว์เลี้ยง (ถามเมื่อมีไฟล์เสียงท่อน 10 "เลี้ยงสัตว์ได้ไหมคะ") → ปุ่ม Pet friendly ในแชท
+  if (s.on("10")) {
+    const pt = await ask("pet", Q("10"), () => P("10"));
+    if (pt.intent === "hangup" || s.gone) return;
+    if (pt.intent === "yes") live.pet_friendly = true;
+    if (pt.intent === "no") live.pet_friendly = false;
+  }
 
   // ต่างชาติ
   const snd = (k) => s.snd[k] ?? null; // ท่อนสัญชาติ/อธิบายกฎ: เล่นเมื่อมีไฟล์เสียง
@@ -523,7 +533,12 @@ async function hangup(s) {
 }
 
 // ---------- จบสาย: ส่งผล + ไฟล์เสียงกลับเว็บ ----------
-const PRE_ANSWER = { 17: "noanswer", 18: "noanswer", 19: "noanswer", 21: "noanswer", 1: "invalid", 3: "invalid", 22: "invalid", 28: "invalid", 34: "noanswer", 38: "noanswer" };
+// สายไม่ได้รับ แยกตาม cause: declined = เจ้าของตัดสาย/สายไม่ว่าง · unreachable = โทรไม่ติดเลย (ปิดเครื่อง เบอร์ไม่มี ไม่มีสัญญาณ) · noanswer = ดังแต่ไม่รับ
+const PRE_ANSWER = {
+  17: "declined", 21: "declined",
+  18: "noanswer", 19: "noanswer",
+  1: "unreachable", 3: "unreachable", 20: "unreachable", 22: "unreachable", 27: "unreachable", 28: "unreachable", 34: "unreachable", 38: "unreachable", 41: "unreachable", 42: "unreachable",
+};
 
 /** ส่งผลโทรไปเว็บ (ลองซ้ำ 4 ครั้ง) */
 async function postResult(payload, mp3) {
@@ -591,6 +606,7 @@ const CAP = {
   push: env("DESK_PUSH_URL", CFG.resultUrl ? new URL("/api/chat/push", CFG.resultUrl).toString() : ""),
   stateFile: `${CFG.recDir}/.caption-last-id`,
 };
+const INTAKE_FORM = /^\s*(?:\d+\s*[.)]\s*)?(?:name\s*property|number\s*owner)\s*\d*\s*[:：]/im;
 const TXT_PHONE = /(?:\+?66|0)[\s-]?[689]\d[\s-]?\d{3}[\s-]?\d{4}|0[2-7][\s-]?\d{3}[\s-]?\d{4}/g;
 const TXT_PRICE = /(?:ราคา|เช่า|price)?\s*(\d{1,3}(?:,\d{3})+|\d{4,6})\s*(?:บาท|฿|thb|\/เดือน|ต่อเดือน)?|(\d{1,3}(?:\.\d)?)\s*[kK]\b/i;
 const TXT_SKIP = /^\s*(?:✅|❌|ว่าง|ไม่ว่าง|move\s*in|รับ|ไม่รับ|ส่งโปรไฟล์|สถานะ|link|map|https?:)/i;
@@ -688,7 +704,8 @@ if (CAP.db && CAP.groups.length && CAP.key && CAP.push) {
               AND COALESCE(BTRIM(m.body->>'text'), '') <> '' AND m.body->'deleted' IS NULL
             ORDER BY m.id LIMIT 50`, [last, CAP.groups, maxId]);
         for (const m of rows) {
-          const rooms = parseRoomsText(m.text);
+          // โพสต์ฟอร์มทรัพย์ใหม่ (Name property: … / Number owner: …) = ทีมลงประกาศ ไม่ใช่ห้องให้ AI โทร
+          const rooms = INTAKE_FORM.test(m.text) ? [] : parseRoomsText(m.text);
           if (rooms.length) {
             // อัลบั้มหลายรูป: ปุ่มสถานะในแชทอยู่ใต้ "รูปสุดท้าย" ของอัลบั้ม (คำบรรยายอยู่รูปแรก) → ผูกกับรูปสุดท้าย
             const target = await albumLast(pool, m).catch(() => Number(m.id));

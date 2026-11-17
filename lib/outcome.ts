@@ -54,6 +54,12 @@ export async function applyCallResult(db: SupabaseClient, r: CallResult) {
     if (attempts >= (s?.max_attempts ?? 3)) status = "closed";
     else nextCallAt = new Date(now + (s?.retry_gap_min ?? 120) * 60_000).toISOString();
   }
+  // ห้องว่าง แต่ยังไม่รู้ว่ารับต่างชาติไหม (วางสายก่อนถึงคำถาม) → ส่ง "ว่าง" ไปก่อน แล้วโทรซ้ำถามให้ครบ (ไม่เกินจำนวนครั้งที่ตั้งไว้)
+  // ใช้สถานะ callback ให้คิวหยิบไปโทรตามเวลา · ผลสายนี้ยังเป็น "ว่าง"
+  if (r.outcome === "avail" && a.accepts_foreigners == null && attempts < (s?.max_attempts ?? 3)) {
+    status = "callback";
+    nextCallAt = new Date(now + (s?.retry_gap_min ?? 120) * 60_000).toISOString();
+  }
   if (r.outcome === "callback") {
     const when = typeof a.callback_at === "string" ? Date.parse(a.callback_at) : NaN;
     nextCallAt = new Date(Number.isFinite(when) && when > now ? when : now + 60 * 60_000).toISOString();
