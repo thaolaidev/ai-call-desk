@@ -26,7 +26,8 @@ export default async function Dashboard() {
     sb.rpc("lead_counts"),
   ]);
   const { data: rooms } = await sb.from("call_rooms").select("segment, name, running, daily_cap, chat_mode");
-  const cap = (rooms ?? []).reduce((a: number, r: any) => a + (r.daily_cap ?? 0), 0) || (settings.data?.daily_cap ?? 200);
+  // ห้องไหนตั้งเป้าต่อวัน 0 = ไม่จำกัด → ไม่แสดงเป้ารวม
+  const cap = (rooms ?? []).some((r: any) => !(r.daily_cap > 0)) ? 0 : (rooms ?? []).reduce((a: number, r: any) => a + (r.daily_cap ?? 0), 0);
   const anyRunning = (rooms ?? []).some((r: any) => r.chat_mode === "auto");
 
   if (settings.error) {
@@ -72,7 +73,7 @@ export default async function Dashboard() {
       <AutoRefresh ms={15000} ping={anyRunning || (inflight.count ?? 0) > 0} />
       <div className="view">
         <div className="kpis">
-          <div className="card kpi ac"><span className="lbl">โทรแล้ววันนี้</span><span className="val">{n}<small> / {cap}</small></span><div className="bar"><i style={{ width: `${Math.min(100, (n / cap) * 100)}%` }} /></div></div>
+          <div className="card kpi ac"><span className="lbl">โทรแล้ววันนี้</span><span className="val">{n}<small>{cap ? ` / ${cap}` : " · ไม่จำกัด"}</small></span>{cap > 0 && <div className="bar"><i style={{ width: `${Math.min(100, (n / cap) * 100)}%` }} /></div>}</div>
           <div className="card kpi ok"><span className="lbl">โทรสำเร็จ (คุยกับเจ้าของได้)</span><span className="val">{conn}</span><span className="sub">{pct(conn)}% ของสายที่จบแล้ว</span></div>
           <div className="card kpi wa"><span className="lbl">ไม่สำเร็จ</span><span className="val">{fail}</span><span className="sub">ไม่รับสาย {g("noanswer")} · ฟังไม่ชัด {g("unclear")} · ติดต่อไม่ได้ {g("invalid")}{g("failed") ? ` · ระบบโทรผิดพลาด ${g("failed")}` : ""}</span></div>
           <div className="card kpi ok"><span className="lbl">ห้องว่าง</span><span className="val">{avail}</span><span className="sub">ไม่ว่าง {g("not_avail")} ห้อง</span></div>

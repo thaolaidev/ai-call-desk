@@ -72,10 +72,10 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <div className="card-b form-grid">
             {["new", "old"].map((seg) => (
               <div key={seg} className="field" style={{ gridColumn: "span 1" }}>
-                <label>ห้อง {room(seg).name ?? (seg === "new" ? "Check ทรัพย์ใหม่" : "Check สถานะห้อง")}: สายพร้อมกัน / เป้าต่อวัน</label>
+                <label>ห้อง {room(seg).name ?? (seg === "new" ? "Check ทรัพย์ใหม่" : "Check สถานะห้อง")}: สายพร้อมกัน / เป้าต่อวัน (0 = ไม่จำกัด)</label>
                 <div style={{ display: "flex", gap: 8 }}>
                   <input name={`concurrency_${seg}`} type="number" min={0} max={10} defaultValue={room(seg).concurrency ?? 3} aria-label="สายพร้อมกัน" style={{ width: "50%" }} />
-                  <input name={`daily_cap_${seg}`} type="number" min={0} defaultValue={room(seg).daily_cap ?? 100} aria-label="เป้าต่อวัน" style={{ width: "50%" }} />
+                  <input name={`daily_cap_${seg}`} type="number" min={0} defaultValue={room(seg).daily_cap ?? 0} aria-label="เป้าต่อวัน (0 = ไม่จำกัด)" placeholder="0 = ไม่จำกัด" style={{ width: "50%" }} />
                 </div>
               </div>
             ))}

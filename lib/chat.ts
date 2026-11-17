@@ -4,7 +4,7 @@ import { vapiProvider } from "./providers/vapi";
 import { yalecomProvider } from "./providers/yalecom";
 import { sipProvider } from "./providers/sip";
 import { bkkClock, toMinutes, todayRangeBKK } from "./time";
-import { notifyCalling, checkHandled } from "./sync";
+import { notifyCalling, checkHandled, clearCalling } from "./sync";
 import { findCondoAudio } from "./condolib";
 import { ensureCondoAudio, defaultReading } from "./botnoi";
 import { findPriceAudio, ensurePriceAudio } from "./priceaudio";
@@ -154,8 +154,10 @@ async function dispatchRoom(db: SupabaseClient, s: any, room: any): Promise<{ st
     db.from("calls").select("id", { count: "exact", head: true }).eq("via_chat", true).eq("segment", room.segment).in("state", IN_FLIGHT),
     db.from("calls").select("id", { count: "exact", head: true }).eq("segment", room.segment).gte("started_at", from).lt("started_at", to),
   ]);
-  const slots = Math.min((room.concurrency ?? 3) - (inflight ?? 0), (room.daily_cap ?? 100) - (today ?? 0));
-  if (slots <= 0) return { started: 0, waiting: (today ?? 0) >= (room.daily_cap ?? 100) ? `ห้อง ${room.name} ครบเป้าต่อวันแล้ว` : "สายเต็ม รอสายก่อนหน้าจบ", errors };
+  // เป้าต่อวัน 0 (หรือไม่ตั้ง) = ไม่จำกัด
+  const cap = (room.daily_cap ?? 0) > 0 ? room.daily_cap : Infinity;
+  const slots = Math.min((room.concurrency ?? 3) - (inflight ?? 0), cap - (today ?? 0));
+  if (slots <= 0) return { started: 0, waiting: (today ?? 0) >= cap ? `ห้อง ${room.name} ครบเป้าต่อวันแล้ว` : "สายเต็ม รอสายก่อนหน้าจบ", errors };
 
   const { data: leads, error: ce } = await db.rpc("claim_chat_leads", { p_limit: slots, p_segment: room.segment });
   if (ce) return { started: 0, errors: [ce.message] };
@@ -178,16 +180,21 @@ async function dispatchRoom(db: SupabaseClient, s: any, room: any): Promise<{ st
       await db.from("leads").update({ status: lead.prev_status ?? "queued" }).eq("id", lead.id);
       continue;
     }
+    let notified = false;
     try {
       await prepareAudio(db, lead);
+      // แจ้ง "กำลังโทร" ก่อนโทรออก (ไม่ใช่หลัง) — สายที่ไม่รับเร็ว ผลจะมาถึงก่อนป้ายกำลังโทร แล้วป้ายค้าง
+      await notifyCalling(lead);
+      notified = true;
       const r = await provider.start({ callId: call.id, lead, settings: s });
       await db
         .from("calls")
         .update({ provider_call_id: r.providerCallId ?? null, sim_end_at: r.simEndAt ?? null, state: provider.name === "simulate" ? "in_progress" : "dialing" })
         .eq("id", call.id);
       started++;
-      await notifyCalling(lead);
     } catch (e) {
+      // โทรออกไม่ได้ → เอาป้ายกำลังโทรที่เพิ่งตั้งออก
+      if (notified) await clearCalling(lead).catch(() => null);
       const msg = e instanceof Error ? e.message : String(e);
       errors.push(`${lead.condo}: ${msg}`);
       await db.from("calls").update({ state: "failed", ended_at: new Date().toISOString(), summary: msg }).eq("id", call.id);

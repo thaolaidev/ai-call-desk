@@ -128,6 +128,18 @@ export async function notifyCalling(lead: any, call?: { chat_group_uuid?: string
   }).catch(() => null);
 }
 
+/** โทรออกไม่สำเร็จหลังตั้งป้ายกำลังโทรแล้ว → ส่ง "ติดต่อไม่ได้" ให้หลังบ้านเอาป้ายกำลังโทรออก (สถานะห้องไม่เปลี่ยน) */
+export async function clearCalling(lead: any) {
+  const t = target();
+  if (!t?.key || !lead?.external_id) return;
+  await fetch(t.url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-Key": t.key },
+    body: JSON.stringify({ id: lead.external_id, code: lead.code ?? null, status: "ติดต่อไม่ได้", updated_by: "AI Call", note: "โทรออกไม่สำเร็จ (ระบบโทร) จะลองใหม่", outcome: "error" }),
+    signal: AbortSignal.timeout(8_000),
+  }).catch(() => null);
+}
+
 /**
  * ถามเว็บเท่าไหร่ว่าคนในทีมโทร/กดสถานะห้องเหล่านี้ไปแล้วหรือยัง (POST {VPS_API_URL}/check)
  * คืน Map id → { status, by } เฉพาะห้องที่ทีมจัดการแล้ว · เรียกไม่ได้ = Map ว่าง (โทรต่อตามปกติ)

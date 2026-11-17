@@ -92,10 +92,10 @@ export default async function CallingPage() {
                     ))}
                   </form>
                   <div className="room-row">
-                    <span className="room-stat">{today}<small> / {room.daily_cap} สาย</small></span>
+                    <span className="room-stat">{today}<small>{room.daily_cap > 0 ? ` / ${room.daily_cap} สาย` : " สาย · ไม่จำกัด"}</small></span>
                     <span className="small muted">ใช้ {calls.length}/{room.concurrency} สาย · รอโทร {waitN} ห้อง</span>
                   </div>
-                  <div className="bar"><i style={{ width: `${room.daily_cap ? Math.min(100, (today / room.daily_cap) * 100) : 0}%` }} /></div>
+                  {room.daily_cap > 0 && <div className="bar"><i style={{ width: `${Math.min(100, (today / room.daily_cap) * 100)}%` }} /></div>}
                   {mode === "queue" && waitN > 0 && <span className="small muted">กด “โทรทันที” เพื่อเริ่มโทรห้องที่รอ</span>}
                 </div>
 

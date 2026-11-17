@@ -85,7 +85,7 @@ export async function tick(): Promise<TickReport> {
       db.from("calls").select("id", { count: "exact", head: true }).eq("segment", room.segment).in("state", IN_FLIGHT),
       db.from("calls").select("id", { count: "exact", head: true }).eq("segment", room.segment).gte("started_at", from).lt("started_at", to),
     ]);
-    const slots = Math.min(room.concurrency - (inflight ?? 0), room.daily_cap - (today ?? 0));
+    const slots = Math.min(room.concurrency - (inflight ?? 0), (room.daily_cap > 0 ? room.daily_cap : Infinity) - (today ?? 0)); // 0 = ไม่จำกัด
     if (slots <= 0) continue;
 
     const { data: leads, error: ce } = await db.rpc("claim_leads", { p_limit: slots, p_segment: room.segment });
