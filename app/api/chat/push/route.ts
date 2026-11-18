@@ -16,7 +16,11 @@ const MAX_ROOMS = 30;
  * ผลการโทรส่งกลับทาง POST {VPS_API_URL}/results ทันทีที่สายจบ (มี chat_group_uuid + asset_uuid ให้ไปอัปเดตการ์ดห้อง)
  */
 /** ชื่อที่จริงๆ เป็นหัวข้อในฟอร์มทรัพย์ใหม่ ไม่ใช่ชื่อคอนโด */
-const FORM_LINE = /^\s*(?:\d+\s*[.)]\s*)?(?:number\s*owner|owner\s*(?:id\s*)?line|name\s*property|room\s*type|type|size|floor|price|pet|code|phone|tel|project|link|line)\b/i;
+/** เลขข้อความจาก id "msg-40668-1" → 40668 (ไม่ใช่ msg- = 0) */
+const msgNo = (id: string) => Number(/^msg-(\d+)/.exec(id)?.[1] ?? 0);
+/** ชื่อที่เป็นป้ายปุ่ม/คำสั้น ไม่ใช่ชื่อคอนโด เช่น "Ag" "ว่าง" "รอตอบ" */
+const JUNK_NAME = /^\s*(ag|agent|ok|ว่าง|ไม่ว่าง|รอตอบ|ด่วน|โทร|ราคา|ลด|เช่า|ขาย)\s*$/i;
+const FORM_LINE = /^\s*(?:\d+\s*[.)]\s*)?(?:number\s*owner|owner\s*(?:id\s*)?line|name\s*property|room\s*type|type|size|floor|price|pet|code|phone\s*\d*|tel|project|link|line)(?![a-z])/i;
 
 export async function POST(req: NextRequest) {
   if (!process.env.CHAT_API_KEY || req.headers.get("x-api-key") !== process.env.CHAT_API_KEY) {
@@ -69,7 +73,10 @@ export async function POST(req: NextRequest) {
       const l: any = (same ?? []).find((x: any) => x.phone === normalizePhone(String(r.phone)) && String(x.condo).trim().toLowerCase() === name);
       if (!l || l.external_id === String(r.id)) continue;
       byId.set(String(r.id), l); // ใช้กฎกันโทรซ้ำของลีดเดิม
-      if (!["calling", "queued"].includes(l.status) && !(l.last_called_at && Date.now() - Date.parse(l.last_called_at) < recallMs)) {
+      // ข้อความใหม่กว่า (เช่น รูปสุดท้ายของอัลบั้มเดียวกัน หรือโพสต์ซ้ำ) → ย้ายห้องไปผูกกับข้อความใหม่ ให้ป้ายขึ้นใต้โพสต์ที่เห็น
+      // ห้องที่กำลังโทรอยู่ไม่ย้าย (ป้ายกำลังโทรตั้งไว้ที่ข้อความเดิมแล้ว)
+      const newer = msgNo(String(r.id)) > msgNo(String(l.external_id ?? ""));
+      if (l.status !== "calling" && (newer || (l.status !== "queued" && !(l.last_called_at && Date.now() - Date.parse(l.last_called_at) < recallMs)))) {
         await db.from("leads").update({ external_id: String(r.id) }).eq("id", l.id);
       }
     }
@@ -82,7 +89,8 @@ export async function POST(req: NextRequest) {
     // โพสต์ฟอร์มทรัพย์ใหม่ (Name property / Number owner / Type …) = ทีมลงประกาศเอง ไม่ใช่ห้องให้ AI โทร
     // หลังบ้านอ่านชื่อจากบรรทัด "Number owner 1: 08x…" ได้เป็น "Number Owner 1" → ข้าม
     // ฟอร์มห้องชมพู (Project / Price / Phone / Pet) หลังบ้านอ่านชื่อผิดเป็น "Phone" → ข้าม (server เสียงอ่านฟอร์มนี้แล้วส่งชื่อที่ถูกมาเอง)
-    if (String(id ?? "").startsWith("msg-") && FORM_LINE.test(String(r?.typed_condo ?? r?.condo_name ?? r?.condo ?? ""))) {
+    const typedName = String(r?.typed_condo ?? r?.condo_name ?? r?.condo ?? "");
+    if (String(id ?? "").startsWith("msg-") && (FORM_LINE.test(typedName) || JUNK_NAME.test(typedName) || typedName.trim().length < 3)) {
       result.push({ asset_uuid: asset, id, state: "skipped", reason: "โพสต์ฟอร์มทรัพย์ใหม่ ไม่ต้องโทร" });
       continue;
     }

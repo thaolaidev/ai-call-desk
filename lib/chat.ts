@@ -109,6 +109,9 @@ export async function rescueStuck(db: SupabaseClient) {
   return fixed;
 }
 
+/** ชื่อคอนโดที่ไม่ใช่ชื่อจริง (หัวข้อในฟอร์ม / ป้ายปุ่ม) */
+const BAD_CONDO = /^\s*(?:\d+\s*[.)]\s*)?(?:number\s*owner|owner\s*(?:id\s*)?line|name\s*property|phone\s*\d*|tel|project|link|line|ag|agent|ว่าง|ไม่ว่าง|รอตอบ)(?![a-z])/i;
+
 let lastPrune = 0;
 /** ทุก tick และทุก 30 วินาทีจาก server เสียง (ไม่ถี่กว่า 30 วินาที): เช็กห้องที่รอในคิวจากแชท แล้วเอาห้องที่ทีมโทรเองแล้วออก (ทุกโหมด) */
 export async function pruneWaiting(db: SupabaseClient, s?: any, minGapMs = 30_000) {
@@ -163,6 +166,12 @@ async function dispatchRoom(db: SupabaseClient, s: any, room: any): Promise<{ st
   if (ce) return { started: 0, errors: [ce.message] };
   // ห้องที่ทีมโทรเองแล้ว → เอาออก ไม่โทร
   const handled = await pruneHandled(db, s, leads ?? []);
+  // ชื่อคอนโดที่เป็นหัวข้อฟอร์ม/ป้ายปุ่ม (Number Owner 1, Phone, Ag …) ที่ค้างในคิวจากก่อนมีตัวกรอง → ไม่โทร เอาออกจากคิว
+  for (const l of leads ?? []) {
+    if (handled.has(l.id) || !BAD_CONDO.test(String(l.condo ?? "")) && String(l.condo ?? "").trim().length >= 3) continue;
+    handled.add(l.id);
+    await db.from("leads").update({ status: "new", chat_requested_at: null, next_call_at: null, last_summary: "ไม่โทร: ชื่อคอนโดไม่ถูกต้อง (มาจากหัวข้อฟอร์ม/ป้ายปุ่ม)" }).eq("id", l.id);
+  }
 
   const provider = providerOf(s.provider);
   let started = 0;

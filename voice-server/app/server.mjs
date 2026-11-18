@@ -754,7 +754,7 @@ async function albumLast(pool, m) {
   let last = { id: Number(m.id), at: new Date(m.created_at).getTime(), batch: m.batch };
   for (const r of rows) {
     const at = new Date(r.created_at).getTime();
-    const same = r.kind === "attachment" && !r.deleted && !r.reply_to && String(r.sender_user_id) === String(m.sender_user_id) && at - last.at <= 120_000
+    const same = r.kind === "attachment" && !r.deleted && !(r.reply_to && r.reply_to !== "0") && String(r.sender_user_id) === String(m.sender_user_id) && at - last.at <= 120_000
       && (last.batch && r.batch ? r.batch === last.batch : !r.text);
     if (!same) break;
     last = { id: Number(r.id), at, batch: r.batch };
@@ -793,6 +793,9 @@ if (CAP.db && CAP.groups.length && CAP.key && CAP.push) {
               AND COALESCE(BTRIM(m.body->>'text'), '') <> '' AND m.body->'deleted' IS NULL
             ORDER BY m.id LIMIT 50`, [last, CAP.groups, maxId]);
         for (const m of rows) {
+          // รูปหลายรูปอัปโหลดทีละรูป (อัลบั้มใหญ่ใช้เวลาเกินนาที) → รอให้โพสต์รูปเก่ากว่า 90 วินาทีก่อน ถึงจะรู้ว่ารูปสุดท้ายคือรูปไหน
+          // ยังไม่ถึง = หยุดรอบนี้ไว้ก่อน (ไม่ข้ามไป) รอบหน้าค่อยอ่าน
+          if (m.kind === "attachment" && Date.now() - new Date(m.created_at).getTime() < 90_000) { failed = true; break; }
           // โพสต์ฟอร์มทรัพย์ใหม่ (Name property: … / Number owner: …) = ทีมลงประกาศ ไม่ใช่ห้องให้ AI โทร
           // ฟอร์มมีหัวข้อ (Project / Price / Phone / Pet) อ่านด้วย parseLabeled ทั้งข้อความและคำบรรยายใต้รูป
           // ข้อความธรรมดา (ไม่ใช่ฟอร์ม) หลังบ้านส่งให้เองอยู่แล้ว → ข้าม · รูปที่ไม่ใช่ฟอร์ม → parseRoomsText เหมือนเดิม
@@ -800,7 +803,12 @@ if (CAP.db && CAP.groups.length && CAP.key && CAP.push) {
           const rooms = labeled ?? (m.kind === "attachment" ? parseRoomsText(m.text) : []);
           if (rooms.length) {
             // อัลบั้มหลายรูป: ปุ่มสถานะในแชทอยู่ใต้ "รูปสุดท้าย" ของอัลบั้ม (คำบรรยายอยู่รูปแรก) → ผูกกับรูปสุดท้าย
-            const target = m.kind === "attachment" ? await albumLast(pool, m).catch(() => Number(m.id)) : Number(m.id);
+            // หารูปสุดท้ายของอัลบั้มไม่ได้ (ฐานข้อมูลสะดุด) → ยังไม่ส่ง รอบหน้าลองใหม่ (ไม่ผูกกับรูปแรกแบบเงียบๆ)
+            let target = Number(m.id);
+            if (m.kind === "attachment") {
+              try { target = await albumLast(pool, m); }
+              catch (e) { log("caption albumLast error", m.id, e.message); failed = true; break; }
+            }
             const payload = rooms.map((r, i) => ({ id: `msg-${target}-${i + 1}`, condo_name: r.condo, phone: r.phone, message_id: target, ...(r.price != null ? { price: r.price } : {}), ...(r.pet != null ? { pet_friendly: r.pet } : {}), ...(r.alt_phone ? { alt_phone: r.alt_phone } : {}) }));
             const res = await fetch(CAP.push, {
               method: "POST", headers: { "Content-Type": "application/json", "X-API-Key": CAP.key },
@@ -808,7 +816,7 @@ if (CAP.db && CAP.groups.length && CAP.key && CAP.push) {
               signal: AbortSignal.timeout(45_000),
             }).catch((e) => ({ ok: false, status: 0, text: async () => e.message }));
             const j = res.ok ? await res.json().catch(() => ({})) : null;
-            log("caption push", m.id, rooms.map((r) => `${r.phone}${r.alt_phone ? `/${r.alt_phone}` : ""} ${r.condo}`).join(" | "), res.ok ? `queued ${j?.queued ?? 0} started ${j?.started ?? 0}${j?.waiting ? ` (${j.waiting})` : ""}${(j?.rooms ?? []).filter((x) => x.state === "skipped").map((x) => ` · ข้าม: ${x.reason}`).join("")}` : `ERR ${res.status} ${(await res.text().catch(() => "")).slice(0, 120)}`);
+            log("caption push", m.id === String(target) ? m.id : `${m.id}→${target}`, rooms.map((r) => `${r.phone}${r.alt_phone ? `/${r.alt_phone}` : ""} ${r.condo}`).join(" | "), res.ok ? `queued ${j?.queued ?? 0} started ${j?.started ?? 0}${j?.waiting ? ` (${j.waiting})` : ""}${(j?.rooms ?? []).filter((x) => x.state === "skipped").map((x) => ` · ข้าม: ${x.reason}`).join("")}` : `ERR ${res.status} ${(await res.text().catch(() => "")).slice(0, 120)}`);
             if (!res.ok && res.status !== 400) { failed = true; break; } // เว็บล่ม → ลองใหม่รอบหน้า (ไม่ขยับ last)
           }
           last = Number(m.id);
