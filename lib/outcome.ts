@@ -60,16 +60,19 @@ export async function applyCallResult(db: SupabaseClient, r: CallResult) {
     status = "callback";
     nextCallAt = new Date(now + (s?.retry_gap_min ?? 120) * 60_000).toISOString();
   }
+  const maxed = attempts >= (s?.max_attempts ?? 3);
   if (r.outcome === "callback") {
     const when = typeof a.callback_at === "string" ? Date.parse(a.callback_at) : NaN;
     nextCallAt = new Date(Number.isFinite(when) && when > now ? when : now + 60 * 60_000).toISOString();
+    // ขอให้โทรกลับ แต่โทรครบจำนวนครั้งแล้ว → เอาออกจากคิว ไม่โทรอีก
+    if (maxed) { status = "closed"; nextCallAt = null; }
   }
 
   let summary = r.summary ?? (typeof a.summary_th === "string" ? a.summary_th : null);
 
   // มีเบอร์สำรอง (Phone 2) และเบอร์นี้ไม่รับ/ไม่ติด/ไม่ใช่เจ้าของ → สลับไปโทรเบอร์สำรองทันที (ครั้งเดียว)
   let switchPhone: string | null = null;
-  if (lead.alt_phone && lead.alt_phone !== lead.phone && ["noanswer", "invalid", "wrong_number"].includes(r.outcome)) {
+  if (!maxed && lead.alt_phone && lead.alt_phone !== lead.phone && ["noanswer", "invalid", "wrong_number"].includes(r.outcome)) {
     switchPhone = lead.alt_phone;
     status = "noanswer";
     nextCallAt = new Date(now + 60_000).toISOString();
