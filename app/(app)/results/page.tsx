@@ -53,10 +53,23 @@ export default async function ResultsPage({ searchParams }: { searchParams: SP }
   let q = sb.from("calls").select("id, outcome, started_at, duration_sec, attempt, summary, segment, sync_status, via_chat, leads!calls_lead_id_fkey(condo, owner_name, segment)").eq("state", "ended").order("started_at", { ascending: false }).limit(150);
   if (outcome !== "all") q = q.eq("outcome", outcome);
   if (seg !== "all") q = q.eq("segment", seg);
-  let cq = sb.from("calls").select("outcome, segment, started_at, duration_sec, needs_review:analysis->needs_review").eq("state", "ended").order("started_at", { ascending: false }).limit(10000);
-  if (rg.from) { q = q.gte("started_at", rg.from); cq = cq.gte("started_at", rg.from); }
-  if (rg.to) { q = q.lt("started_at", rg.to); cq = cq.lt("started_at", rg.to); }
-  const [{ data: list, error }, { data: countRows }] = await Promise.all([q, cq]);
+  if (rg.from) q = q.gte("started_at", rg.from);
+  if (rg.to) q = q.lt("started_at", rg.to);
+  // ตัวเลขสรุป: Supabase ส่งได้ครั้งละไม่เกิน 1,000 แถว → ดึงทีละหน้าจนครบ
+  const countAll = async () => {
+    const out: any[] = [];
+    for (let off = 0; off < 200_000; off += 1000) {
+      let cq = sb.from("calls").select("id, outcome, segment, started_at, duration_sec, needs_review:analysis->needs_review").eq("state", "ended")
+        .order("started_at", { ascending: false }).order("id").range(off, off + 999);
+      if (rg.from) cq = cq.gte("started_at", rg.from);
+      if (rg.to) cq = cq.lt("started_at", rg.to);
+      const { data } = await cq;
+      out.push(...(data ?? []));
+      if (!data || data.length < 1000) break;
+    }
+    return out;
+  };
+  const [{ data: list, error }, countRows] = await Promise.all([q, countAll()]);
 
   // mini dashboard: ตัวเลขของห้องที่เลือก + ช่วงวันที่
   const rowsSeg = (countRows ?? []).filter((r: any) => seg === "all" || r.segment === seg);

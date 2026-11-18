@@ -49,11 +49,21 @@ export default async function CostsPage({ searchParams }: { searchParams: SP }) 
   const hasRateCol = s ? "cost_per_min" in (s as any) : false;
 
   // สายที่โทรออกจริง (ไม่นับที่โทรออกไม่สำเร็จจากระบบ) · ค่าโทรคิดจากเวลาตั้งแต่เจ้าของรับสายจนวาง ปัดขึ้นเป็นนาทีทีละสาย
-  let q = sb.from("calls").select("segment, started_at, duration_sec, state").eq("state", "ended").order("started_at", { ascending: false }).limit(50000);
-  if (seg !== "all") q = q.eq("segment", seg);
-  if (rg.from) q = q.gte("started_at", rg.from);
-  if (rg.to) q = q.lt("started_at", rg.to);
-  const { data: rows, error } = await q;
+  // Supabase ส่งกลับได้ครั้งละไม่เกิน 1,000 แถว → ดึงทีละหน้าจนครบ (เดิมตัดที่ 1,000 สาย วันเก่าเลยหาย)
+  const PAGE = 1000;
+  const rows: any[] = [];
+  let error: { message: string } | null = null;
+  for (let off = 0; off < 200_000; off += PAGE) {
+    let q = sb.from("calls").select("id, segment, started_at, duration_sec, state").eq("state", "ended")
+      .order("started_at", { ascending: false }).order("id").range(off, off + PAGE - 1);
+    if (seg !== "all") q = q.eq("segment", seg);
+    if (rg.from) q = q.gte("started_at", rg.from);
+    if (rg.to) q = q.lt("started_at", rg.to);
+    const { data, error: e } = await q;
+    if (e) { error = e; break; }
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE) break;
+  }
 
   const byDay = new Map<string, Day>();
   const total = empty();
