@@ -83,6 +83,10 @@ export async function POST(req: NextRequest) {
   const availAnswered = answers.some((a) => a.step === "avail" && (a.intent === "yes" || a.intent === "no"));
   const unconfirmedAvail = groupOf(outcome) === "avail" && liveOutcome === "unclear" && !availAnswered;
   if (unconfirmedAvail) outcome = "unclear";
+  // รับสายแล้วเจ้าของวางสายเองก่อนตอบเรื่องห้องว่าง = "ตัดสาย" (เหมือนตัดสายตอนเรียกเข้า)
+  //  ห้อง Check สถานะห้อง → ไม่ว่าง · ห้อง Check ทรัพย์ใหม่ → ยังไม่แน่นอน + โทรซ้ำ (ไม่ใช่ฟังไม่ชัด)
+  const ownerHungUp = r.owner_hangup === true && outcome === "unclear" && !availAnswered;
+  if (ownerHungUp) outcome = call.segment === "old" ? "not_avail" : "noanswer";
   const pick = (k: string) => live[k] ?? (full?.details as any)?.[k] ?? null;
   // ถ้าระหว่างสายกับหลังจบได้ผลไม่ตรงกัน (เช่น "ยังว่าง" กับ "ไม่ว่าง") → ใช้ผลหลังจบ และติดธงให้แอดมินฟังซ้ำ
   const conflict = disagree || textConflict;
@@ -92,9 +96,12 @@ export async function POST(req: NextRequest) {
     callId: call.id,
     outcome,
     durationSec: Number(r.duration_sec) || null,
-    summary: `${unconfirmedAvail ? "⚠️ เจ้าของยังไม่ได้ตอบว่าห้องว่าง · " : conflict ? "⚠️ ควรฟังซ้ำ · " : ""}${full?.summary || (liveSummary ? `เจ้าของตอบ — ${liveSummary}` : "")}` || null,
+    summary: ownerHungUp
+      ? (call.segment === "old" ? "เจ้าของวางสายก่อนตอบ → ปรับห้องเป็นไม่ว่าง" : "เจ้าของวางสายก่อนตอบเรื่องห้องว่าง")
+      : `${unconfirmedAvail ? "⚠️ เจ้าของยังไม่ได้ตอบว่าห้องว่าง · " : conflict ? "⚠️ ควรฟังซ้ำ · " : ""}${full?.summary || (liveSummary ? `เจ้าของตอบ — ${liveSummary}` : "")}` || null,
     endedReason: "answered (sip)",
     analysis: {
+      ...(ownerHungUp ? { call_kind: "hangup" } : {}),
       call_outcome: outcome,
       room_available: outcome.startsWith("avail") ? true : outcome === "not_avail" ? false : null,
       ready_now: pick("ready_now"),

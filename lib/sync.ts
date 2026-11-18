@@ -38,7 +38,7 @@ const FAIL_NOTE: Record<string, string> = {
 /** หมายเหตุตอนติดต่อไม่ได้ เช่น "ไม่รับสาย (ครั้งที่ 1/3) · AI จะโทรซ้ำ 10:38" — ขึ้นบนการ์ด/ปุ่มในแชท */
 /** ลักษณะสายที่ไม่ได้คุย จาก ended_reason "sip:declined cause 17" → declined / noanswer / unreachable / error */
 export const callKind = (call: any) => String(call?.analysis?.call_kind ?? /^sip:(\w+)/.exec(String(call?.ended_reason ?? ""))?.[1] ?? "");
-const KIND_TEXT: Record<string, string> = { declined: "เจ้าของตัดสาย", unreachable: "โทรไม่ติด (ปิดเครื่อง/ไม่มีสัญญาณ)", error: "ระบบโทรออกไม่สำเร็จ" };
+const KIND_TEXT: Record<string, string> = { declined: "เจ้าของตัดสาย", hangup: "เจ้าของวางสายก่อนตอบ", unreachable: "โทรไม่ติด (ปิดเครื่อง/ไม่มีสัญญาณ)", error: "ระบบโทรออกไม่สำเร็จ" };
 
 function failNote(call: any, lead: any, willRetry: boolean, max?: number | null) {
   const what = call.outcome === "noanswer" ? KIND_TEXT[callKind(call)] ?? "ไม่รับสาย" : FAIL_NOTE[call.outcome] ?? "โทรแล้วติดต่อไม่ได้";
