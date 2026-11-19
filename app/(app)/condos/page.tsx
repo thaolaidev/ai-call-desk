@@ -16,7 +16,7 @@ export const maxDuration = 60;
 
 type SP = Promise<{ f?: string; q?: string; page?: string; msg?: string }>;
 const PER = 50;
-const TABS = [["all", "มีลีด"], ["missing", "ยังไม่มีเสียง"], ["has", "มีเสียงแล้ว"], ["error", "สร้างไม่สำเร็จ"], ["lib", "คลังรวม"]] as const;
+const TABS = [["all", "มีลีด"], ["new", "ชื่อใหม่ (ไม่อยู่ในคลัง)"], ["missing", "ยังไม่มีเสียง"], ["has", "มีเสียงแล้ว"], ["error", "สร้างไม่สำเร็จ"], ["lib", "คลังรวม"]] as const;
 
 export default async function CondosPage({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
@@ -39,7 +39,11 @@ export default async function CondosPage({ searchParams }: { searchParams: SP })
   }
   const isHas = (x: any) => !!x.a?.path;
   const isErr = (x: any) => !x.a?.path && !!x.a?.tts_error;
-  const count = { all: all.length, has: all.filter(isHas).length, error: all.filter(isErr).length, missing: all.filter((x) => !isHas(x)).length, lib: libTotal ?? 0 };
+  // ชื่อใหม่ = ชื่อที่ทีมพิมพ์ในแชทแล้วเทียบกับคลังไม่เจอ (ไม่มี condo_id) · ต้องใส่คำอ่านไทยให้ถูก แล้วอ่านใหม่ / อัปโหลดเสียงเอง
+  // ครั้งต่อไปมีชื่อนี้ (หรือชื่อใกล้เคียง) อีก ระบบใช้เสียงเดิมของแถวนี้ซ้ำ ไม่อ่านใหม่
+  const isNew = (x: any) => !x.condo_id && !x.a?.condo_id;
+  const thaiOk = (x: any) => !!x.a?.path && (x.a?.audio_source === "upload" || /[\u0E00-\u0E7F]/.test(String(x.a?.tts_text ?? "")));
+  const count = { new: all.filter(isNew).length, all: all.length, has: all.filter(isHas).length, error: all.filter(isErr).length, missing: all.filter((x) => !isHas(x)).length, lib: libTotal ?? 0 };
 
   // แท็บ "คลังรวม": อ่านจากคลังทั้งหมดทีละหน้า (ไม่โหลดทั้งหมื่นแถว)
   let libRows: any[] = [];
@@ -54,9 +58,9 @@ export default async function CondosPage({ searchParams }: { searchParams: SP })
   }
   const leadCount = new Map(all.map((x) => [x.a?.condo ?? x.condo, x.n]));
   const list = f === "lib" ? libRows.map((a) => ({ key: `lib:${a.condo}`, condo: a.condo, condo_id: a.condo_id ?? null, n: leadCount.get(a.condo) ?? 0, a })) : all
-    .filter((x) => (f === "has" ? isHas(x) : f === "missing" ? !isHas(x) : f === "error" ? isErr(x) : true))
+    .filter((x) => (f === "new" ? isNew(x) : f === "has" ? isHas(x) : f === "missing" ? !isHas(x) : f === "error" ? isErr(x) : true))
     .filter((x) => !q || x.condo.toLowerCase().includes(q) || (x.condo_id ?? "").toLowerCase() === q || (x.a?.tts_text ?? "").toLowerCase().includes(q))
-    .sort((a, b) => b.n - a.n || a.condo.localeCompare(b.condo, "th"));
+    .sort((a, b) => (f === "new" ? Number(thaiOk(a)) - Number(thaiOk(b)) : 0) || b.n - a.n || a.condo.localeCompare(b.condo, "th"));
   const pages = Math.max(1, Math.ceil((f === "lib" ? libCount : list.length) / PER));
   const shown = f === "lib" ? list : list.slice((page - 1) * PER, page * PER);
   const href = (o: Record<string, string | number>) => {
@@ -78,6 +82,8 @@ export default async function CondosPage({ searchParams }: { searchParams: SP })
         {sp.msg && <p className="banner">{sp.msg}</p>}
 
         <p className="hint">นำเข้าชีทคลังคอนโดไว้ก่อน (คอลัมน์ id + name_th) · พอดึงลีดมาแล้วตรงกับ id หรือชื่อไหน ระบบจึงให้ Botnoi อ่าน<b>เฉพาะชื่อภาษาไทย</b> แล้วเก็บไฟล์ไว้ใช้ซ้ำ (คอนโดที่ไม่มีลีดจะไม่ถูกอ่าน ไม่เปลืองเครดิต) · ช่องค้นหาค้นได้ทั้งคลัง · อ่านผิด: แก้คำอ่านแล้วกด "อ่านใหม่" หรืออัปโหลดไฟล์เองแทน</p>
+
+        {f === "new" && <p className="banner">ชื่อคอนโดที่ทีมพิมพ์ในแชทแล้ว<b>หาในคลังไม่เจอ</b> · ใส่คำอ่านภาษาไทยให้ถูก แล้วกด <b>บันทึก + อ่านใหม่</b> หรืออัปโหลดไฟล์เสียงเอง · ครั้งต่อไปถ้ามีชื่อนี้อีก ระบบใช้เสียงเดิมทันที ไม่อ่านใหม่ · แถวที่ยังไม่มีคำอ่านไทยอยู่บนสุด</p>}
 
         <div className="toolbar" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <nav className="segtabs" aria-label="กรองคอนโด">
@@ -106,13 +112,16 @@ export default async function CondosPage({ searchParams }: { searchParams: SP })
                       <td style={{ maxWidth: 240 }} data-label="ชื่อคอนโด">
                         <b style={{ fontWeight: 500 }}>{condo}</b>
                         <div className="hint">{n} ลีด · <span className="mono">{file}</span> <CopyButton text={file} /></div>
+                        {isNew({ condo_id, a }) && (thaiOk({ a })
+                          ? <span className="pill t-ok" style={{ marginTop: 4 }}>ชื่อใหม่ · มีเสียงแล้ว</span>
+                          : <span className="pill t-wa" style={{ marginTop: 4 }}>ชื่อใหม่ · ต้องใส่คำอ่านไทย</span>)}
                       </td>
                       <td style={{ minWidth: 260 }} data-label="คำอ่าน">
                         <form action={saveCondo} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                           {Object.entries(fields).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
                           <input name="tts_text" defaultValue={a?.tts_text ?? ""} placeholder={defaultReading(condo) ?? "ไม่มีชื่อไทย ใส่คำอ่านเอง"} aria-label={`คำอ่าน ${condo}`} style={{ flex: "1 1 200px", padding: "6px 8px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--surface)" }} />
                           <SaveButton className="btn sm" />
-                          {botnoiReady() && <SaveButton className="btn sm" formAction={regenCondo} label={a?.path ? "อ่านใหม่" : "สร้างเสียง"} done="สร้างเสียงแล้ว" />}
+                          {botnoiReady() && <SaveButton className="btn sm" formAction={regenCondo} label={f === "new" ? "บันทึก + อ่านใหม่" : a?.path ? "อ่านใหม่" : "สร้างเสียง"} done="สร้างเสียงแล้ว" />}
                           <label className="toggle small" title="ส่งไฟล์เข้า Yalecom แล้ว"><input type="checkbox" name="ready" defaultChecked={!!a?.ready} />อยู่ใน Yalecom</label>
                         </form>
                       </td>
