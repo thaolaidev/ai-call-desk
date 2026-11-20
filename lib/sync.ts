@@ -41,7 +41,9 @@ export const callKind = (call: any) => String(call?.analysis?.call_kind ?? /^sip
 const KIND_TEXT: Record<string, string> = { declined: "เจ้าของตัดสาย", hangup: "เจ้าของวางสายก่อนตอบ", unreachable: "โทรไม่ติด (ปิดเครื่อง/ไม่มีสัญญาณ)", error: "ระบบโทรออกไม่สำเร็จ" };
 
 function failNote(call: any, lead: any, willRetry: boolean, max?: number | null) {
-  const what = call.outcome === "noanswer" ? KIND_TEXT[callKind(call)] ?? "ไม่รับสาย" : FAIL_NOTE[call.outcome] ?? "โทรแล้วติดต่อไม่ได้";
+  const what = call.outcome === "noanswer" ? KIND_TEXT[callKind(call)] ?? "ไม่รับสาย"
+    : call.outcome === "unclear" && call.summary ? String(call.summary).replace(/^⚠️[^·]*·\s*/, "").slice(0, 120) // คุยไม่รู้เรื่อง: ใช้สรุปสั้นของ AI
+    : FAIL_NOTE[call.outcome] ?? "โทรแล้วติดต่อไม่ได้";
   const nth = `ครั้งที่ ${call.attempt ?? 1}${max ? `/${max}` : ""}`;
   const at = lead?.next_call_at ? new Date(lead.next_call_at) : null;
   const when = at && !isNaN(+at)
@@ -115,7 +117,8 @@ export function buildResultPayload(call: any, lead: any, sentAt = new Date().toI
     // ไม่รับสาย / ฟังไม่ชัด / ขอให้โทรกลับ = "ยังไม่แน่นอน" (ห้องยังไม่แน่นอน + ประวัติโทรแล้ว · AI โทรซ้ำตามรอบ)
     // เบอร์ผิด / เบอร์ปิด / ไม่ให้ติดต่อ = "ติดต่อไม่ได้" (คงสถานะห้องเดิม)
     // ฟังไม่ชัด = รับสายแต่ได้คำตอบไม่ชัด (ปุ่ม "ฟังไม่ชัด")
-    status: status ?? (call.outcome === "unclear" ? "ฟังไม่ชัด" : UNSURE_OUTCOMES.includes(call.outcome) ? "ยังไม่แน่นอน" : "ติดต่อไม่ได้"),
+    // คุยกันไม่รู้เรื่อง (ฟังไม่ชัด) = "ยังไม่แน่นอน" + รอโทรซ้ำ เหมือนไม่รับสาย (เดิมส่ง "ฟังไม่ชัด")
+    status: status ?? (call.outcome === "unclear" || UNSURE_OUTCOMES.includes(call.outcome) ? "ยังไม่แน่นอน" : "ติดต่อไม่ได้"),
     // ยังไม่ได้คำตอบและ AI จะโทรอีก → ผลโทร "รอโทรซ้ำ" แทน "โทรแล้ว"
     // ห้องว่างที่ยังไม่รู้เรื่องต่างชาติ ก็ "รอโทรซ้ำ" ด้วย (AI จะโทรถามอีกครั้ง)
     retry: willRetry && (!status || call.outcome === "avail"),
