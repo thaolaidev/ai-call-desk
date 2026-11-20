@@ -69,6 +69,9 @@ export async function applyCallResult(db: SupabaseClient, r: CallResult) {
   }
 
   let summary = r.summary ?? (typeof a.summary_th === "string" ? a.summary_th : null);
+  const op = Number(a.owner_price);
+  const newRent = op >= 1000 && op <= 10_000_000 && op !== Number(lead.rent) ? Math.round(op) : null;
+  if (newRent && r.analysis) r.analysis = { ...r.analysis, prev_rent: lead.rent ?? null };
 
   // มีเบอร์สำรอง (Phone 2) และเบอร์นี้ไม่รับ/ไม่ติด/ไม่ใช่เจ้าของ → สลับไปโทรเบอร์สำรองทันที (ครั้งเดียว)
   let switchPhone: string | null = null;
@@ -106,6 +109,8 @@ export async function applyCallResult(db: SupabaseClient, r: CallResult) {
       last_summary: summary,
       last_call_id: r.callId,
       last_called_at: call.started_at,
+      // เจ้าของแจ้งราคาใหม่ → ใช้ราคาใหม่ (โทรรอบหน้าอ่านราคานี้) · ราคาเดิมเก็บไว้ใน analysis.prev_rent
+      ...(newRent ? { rent: newRent } : {}),
       line_id: typeof a.line_id === "string" ? a.line_id : lead.line_id,
       current_lease_until: typeof a.current_lease_until === "string" ? a.current_lease_until : lead.current_lease_until,
     })

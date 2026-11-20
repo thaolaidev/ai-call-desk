@@ -82,8 +82,12 @@ export function buildResultPayload(call: any, lead: any, sentAt = new Date().toI
   ].filter(Boolean).join(" · ");
   // หมายเหตุ = สรุป 1 ประโยคของ AI (แบบ "ห้องยังว่างและพร้อมเข้าอยู่ สายตัดไปก่อนยืนยันราคา") + สิ่งที่ทีมต้องรู้เพิ่ม
   // ไม่มีสรุปจาก AI (ฟังทั้งสายไม่สำเร็จ) = ใช้สรุปแบบรายการแทน
+  const newPrice = Number(a.owner_price) || 0;
+  const prevPrice = Number(a.prev_rent ?? lead?.rent) || 0;
   const addOn = [
     call.outcome === "avail" && willRetry ? "AI จะโทรถามเรื่องต่างชาติอีกครั้ง" : "",
+    // ราคาเปลี่ยน → บอกในหมายเหตุเสมอ (สรุปของ AI อาจไม่ได้พูดถึง)
+    newPrice && newPrice !== prevPrice ? `ราคาใหม่ ${fmt(newPrice)}${prevPrice ? ` (เดิม ${fmt(prevPrice)})` : ""}` : "",
     a.foreign_exclude && !String(call.summary ?? "").includes(String(a.foreign_exclude).split(",")[0]) ? `ไม่รับ ${a.foreign_exclude}` : "",
     a.pet_friendly === true && !/สัตว์|หมา|แมว/.test(String(call.summary ?? "")) ? (a.pet_note ? `เลี้ยงสัตว์ได้ (${a.pet_note})` : "เลี้ยงสัตว์ได้") : "",
   ].filter(Boolean).join(" · ");
