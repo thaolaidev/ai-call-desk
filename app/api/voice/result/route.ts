@@ -23,24 +23,30 @@ export async function POST(req: NextRequest) {
   if (!r?.call_id) return NextResponse.json({ error: "ไม่มี call_id" }, { status: 400 });
 
   const db = createAdminClient();
-  const { data: call } = await db.from("calls").select("id, state, segment").eq("id", r.call_id).maybeSingle();
+  const { data: call } = await db.from("calls").select("id, state, segment, lead_id").eq("id", r.call_id).maybeSingle();
   if (!call) return NextResponse.json({ ok: true, note: "ไม่พบสายนี้" });
   if (call.state === "ended") return NextResponse.json({ ok: true, note: "ประมวลผลไปแล้ว" });
 
   if (r.status !== "answered") {
     // สายไม่ได้คุย แยก 3 แบบ (ตามที่ server เสียงอ่านจาก cause):
-    //  declined    = ตัดสาย/สายไม่ว่าง → ห้อง Check สถานะห้อง: ไม่ว่าง · ห้อง Check ทรัพย์ใหม่: ยังไม่แน่นอน + โทรซ้ำ
+    //  declined    = ตัดสายตั้งแต่ยังไม่ได้คุย → ยังไม่แน่นอน + โทรซ้ำ · ตัดสายครบ 3 ครั้ง → ไม่ว่าง (ทั้ง 2 ห้อง)
     //  noanswer    = ดังแต่ไม่รับ → ยังไม่แน่นอน + โทรซ้ำ
     //  unreachable = โทรไม่ติดเลย (ปิดเครื่อง/เบอร์ไม่มี/ไม่มีสัญญาณ) → ยังไม่แน่นอน + โทรซ้ำ
     //  error       = server เสียงโทรออกไม่สำเร็จ → นับเป็นไม่รับสาย ลองใหม่ตามรอบ
     const kind = r.status === "invalid" ? "unreachable" : String(r.status ?? "noanswer");
-    const declinedOld = kind === "declined" && call.segment === "old";
+    let declines = 0;
+    if (kind === "declined") {
+      const { count } = await db.from("calls").select("id", { count: "exact", head: true })
+        .eq("lead_id", call.lead_id).neq("id", call.id).like("ended_reason", "sip:declined%");
+      declines = (count ?? 0) + 1;
+    }
+    const declinedOld = kind === "declined" && declines >= 3; // ชื่อเดิม: ตัดสายแล้วปรับเป็นไม่ว่าง
     const TEXT: Record<string, string> = { declined: "เจ้าของตัดสาย", unreachable: "โทรไม่ติด (ปิดเครื่อง/เบอร์ไม่มี/ไม่มีสัญญาณ)", error: "server เสียงโทรออกไม่สำเร็จ", noanswer: "ไม่รับสาย" };
     await applyCallResult(db, {
       callId: call.id,
       outcome: declinedOld ? "not_avail" : "noanswer",
       summary: r.status === "error" ? `โทรออกไม่สำเร็จ: ${String(r.error ?? "").slice(0, 200)}`
-        : declinedOld ? "เจ้าของตัดสาย → ปรับห้องเป็นไม่ว่าง" : TEXT[kind] ?? "ไม่รับสาย",
+        : declinedOld ? `เจ้าของตัดสายครบ ${declines} ครั้ง → ปรับห้องเป็นไม่ว่าง` : kind === "declined" ? `เจ้าของตัดสาย (ครั้งที่ ${declines})` : TEXT[kind] ?? "ไม่รับสาย",
       endedReason: `sip:${kind} ${r.status === "error" ? String(r.error ?? "").slice(0, 120) : `cause ${r.cause ?? "-"}`}`,
       transcript: [{ role: "system", text: TEXT[kind] ?? "ไม่รับสาย" }],
       analysis: { call_kind: kind },
@@ -84,9 +90,9 @@ export async function POST(req: NextRequest) {
   const unconfirmedAvail = groupOf(outcome) === "avail" && liveOutcome === "unclear" && !availAnswered;
   if (unconfirmedAvail) outcome = "unclear";
   // รับสายแล้วเจ้าของวางสายเองก่อนตอบเรื่องห้องว่าง = "ตัดสาย" (เหมือนตัดสายตอนเรียกเข้า)
-  //  ห้อง Check สถานะห้อง → ไม่ว่าง · ห้อง Check ทรัพย์ใหม่ → ยังไม่แน่นอน + โทรซ้ำ (ไม่ใช่ฟังไม่ชัด)
+  //  → ยังไม่แน่นอน + โทรซ้ำ ทั้ง 2 ห้อง (ไม่ใช่ฟังไม่ชัด)
   const ownerHungUp = r.owner_hangup === true && outcome === "unclear" && !availAnswered;
-  if (ownerHungUp) outcome = call.segment === "old" ? "not_avail" : "noanswer";
+  if (ownerHungUp) outcome = "noanswer"; // รับสายแล้ววางก่อนตอบ → ยังไม่แน่นอน + โทรซ้ำ (ทั้ง 2 ห้อง)
   const pick = (k: string) => live[k] ?? (full?.details as any)?.[k] ?? null;
   // ถ้าระหว่างสายกับหลังจบได้ผลไม่ตรงกัน (เช่น "ยังว่าง" กับ "ไม่ว่าง") → ใช้ผลหลังจบ และติดธงให้แอดมินฟังซ้ำ
   const conflict = disagree || textConflict;
@@ -97,7 +103,7 @@ export async function POST(req: NextRequest) {
     outcome,
     durationSec: Number(r.duration_sec) || null,
     summary: ownerHungUp
-      ? (call.segment === "old" ? "เจ้าของวางสายก่อนตอบ → ปรับห้องเป็นไม่ว่าง" : "เจ้าของวางสายก่อนตอบเรื่องห้องว่าง")
+      ? "เจ้าของรับสายแล้ววางก่อนตอบเรื่องห้องว่าง"
       : `${unconfirmedAvail ? "⚠️ เจ้าของยังไม่ได้ตอบว่าห้องว่าง · " : conflict ? "⚠️ ควรฟังซ้ำ · " : ""}${full?.summary || (liveSummary ? `เจ้าของตอบ — ${liveSummary}` : "")}` || null,
     endedReason: "answered (sip)",
     analysis: {

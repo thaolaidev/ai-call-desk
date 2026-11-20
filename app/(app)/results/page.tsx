@@ -42,6 +42,14 @@ const FIELD_LABEL: Record<string, string> = {
 const fmtVal = (v: unknown) =>
   v === true ? "ใช่" : v === false ? "ไม่" : Array.isArray(v) ? (v.length ? v.join(", ") : null) : v == null || v === "" ? null : String(v);
 
+/** รหัสทรัพย์ของลีด: รหัสจากหลังบ้าน (code) · ห้องจากโพสต์ในแชทไม่มีรหัส → เลขข้อความ */
+function assetRef(l: any): string | null {
+  if (!l) return null;
+  if (l.code) return `รหัส ${l.code}`;
+  const m = /^msg-(\d+)/.exec(String(l.external_id ?? ""));
+  return m ? `ข้อความ #${m[1]}` : null;
+}
+
 export default async function ResultsPage({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
   const outcome = sp.outcome && (OUTCOMES as string[]).includes(sp.outcome) ? sp.outcome : "all";
@@ -50,7 +58,7 @@ export default async function ResultsPage({ searchParams }: { searchParams: SP }
   const rg = rangeOf(range, sp.from, sp.to);
   const sb = await createClient();
 
-  let q = sb.from("calls").select("id, outcome, started_at, duration_sec, attempt, summary, segment, sync_status, via_chat, leads!calls_lead_id_fkey(condo, owner_name, segment)").eq("state", "ended").order("started_at", { ascending: false }).limit(150);
+  let q = sb.from("calls").select("id, outcome, started_at, duration_sec, attempt, summary, segment, sync_status, via_chat, leads!calls_lead_id_fkey(condo, owner_name, segment, code, external_id)").eq("state", "ended").order("started_at", { ascending: false }).limit(150);
   if (outcome !== "all") q = q.eq("outcome", outcome);
   if (seg !== "all") q = q.eq("segment", seg);
   if (rg.from) q = q.gte("started_at", rg.from);
@@ -190,9 +198,10 @@ export default async function ResultsPage({ searchParams }: { searchParams: SP }
           <div className="card rlist">
             {(list ?? []).map((x: any) => {
               const l = Array.isArray(x.leads) ? x.leads[0] : x.leads;
+              const ref = assetRef(l);
               return (
                 <Link key={x.id} href={`${link({ id: x.id })}#detail`} className={`ritem ${x.id === selId ? "on" : ""}`}>
-                  <span className="r1"><b>{l?.condo}</b><Pill status={x.outcome} /></span>
+                  <span className="r1"><b>{l?.condo}{ref && <span className="mono small muted" style={{ fontWeight: 400 }}> · {ref}</span>}</b><Pill status={x.outcome} /></span>
                   <span className="r1 small muted"><span className="mono">{fmtTime(x.started_at)} · {fmtDur(x.duration_sec)}</span><span>{x.via_chat && <span className="seg">แชท</span>}{seg === "all" && <span className="seg">{(x.segment ?? l?.segment) === "old" ? "สถานะห้อง" : "ทรัพย์ใหม่"}</span>} คุณ{l?.owner_name} · ครั้งที่ {x.attempt}</span></span>
                   <span className="r2">{x.summary}</span>
                 </Link>
@@ -208,7 +217,7 @@ export default async function ResultsPage({ searchParams }: { searchParams: SP }
               <>
                 <div className="card-h">
                   <div>
-                    <h2>{lead.condo}</h2>
+                    <h2>{lead.condo}{assetRef(lead) && <span className="mono muted" style={{ fontWeight: 400, fontSize: "0.8em" }}> · {assetRef(lead)}</span>}</h2>
                     <div className="meta">
                       <span>{lead.unit}</span>{lead.rent && <span>฿{lead.rent.toLocaleString("th-TH")}/เดือน</span>}
                       <span>คุณ{lead.owner_name}</span><span className="mono">{prettyPhone(lead.phone)}</span>
